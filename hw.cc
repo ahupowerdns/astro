@@ -10,11 +10,9 @@
 using namespace std;
 using namespace CCfits;
 
-
-
 int main(int argc, char**argv)
 {   
-  feenableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW ); 
+  feenableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW); 
 
   struct Observation
   {
@@ -131,8 +129,8 @@ int main(int argc, char**argv)
   vector<double> pixelhisto;
   for(auto& row : results) 
     for(auto& val: row) { 
-      if(val.second < 7e8)
-	val.second=0;
+      //      if(val.second < 7e8)
+      // val.second=0;
       maxVal=std::max(maxVal, val.second*val.second);
       pixelhisto.push_back(val.second);
     }

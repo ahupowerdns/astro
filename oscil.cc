@@ -18,6 +18,6 @@ vector<pair<double, double>> OscillatorBank::get()
 {
   vector<pair<double,double>> ret;
   for(auto& o : d_bank)
-    ret.push_back({o.d_freq, o.get()});
+    ret.push_back({o.d_freq, sqrt(o.get())});
   return ret;
 }
