@@ -160,11 +160,32 @@ int main(int argc, char**argv)
   }
 
   
+  
   double maxVal=0;
-  for(const auto& row : results) 
-    for(const auto& val: row) 
+  vector<double> pixelhisto;
+  for(auto& row : results) 
+    for(auto& val: row) { 
+      if(val.second < 7e8)
+	val.second=0;
       maxVal=std::max(maxVal, val.second*val.second);
+      pixelhisto.push_back(val.second);
+    }
 
+  sort(pixelhisto.begin(), pixelhisto.end());
+  ofstream pixelhistofile("pixelhisto");
+  double limitstep = *pixelhisto.rbegin()/1000;
+  double nowlimit=limitstep;
+  unsigned int limitcount=0;
+  for(auto d : pixelhisto) {
+    limitcount++;
+    if(d > nowlimit) {
+      pixelhistofile<<nowlimit<<'\t'<<limitcount<<'\n';
+      limitcount=0;
+      nowlimit += limitstep;
+    }
+  }
+  pixelhistofile<<nowlimit<<'\t'<<limitcount<<'\n';
+  pixelhistofile.flush();
   ofstream plot("plot");
   
   plot << "P6"<<"\n"<<results.begin()->size()<<" "<<results.size()<<"\n255\n";
@@ -205,6 +226,28 @@ int main(int argc, char**argv)
     cout<<avg[i].second/results.size()<<endl;
   }
   
+
+  sort(avg.begin(), avg.end(), [](const pair<double, double>& first, 
+				  const pair<double, double>& second) {
+	 return first.second < second.second;
+       });
+
+  vector<double> topFreqs;
+  unsigned int i=0;
+  for(auto iter = avg.rbegin(); iter != avg.rend() && i< 20; ++i, ++iter) 
+    topFreqs.push_back(iter->first);
+
+  vector<double> distances;
+  for(auto a : topFreqs) {
+    for(auto b : topFreqs) {
+      if(a<b)
+	distances.push_back(b-a);
+    }
+  }
+  sort(distances.begin(), distances.end());
+  for(auto d : distances)
+    cout << d << endl;
+      
 
   return 0;       
 }
