@@ -13,9 +13,9 @@ all: $(PROGRAMS)
 
 -include *.d
 
-hw: hw.o
-	g++ hw.o -lCCfits -o hw
-	
+hw: hw.o oscil.o
+	g++ $^ -lCCfits -o hw
+
 clean:
 	rm -f *~ *.o hw *.d githash githash.h
-	
+

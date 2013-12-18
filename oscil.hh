@@ -3,6 +3,7 @@
 #include <cmath>
 #include <iostream>
 #include <utility>
+#include <vector>
 using namespace std;
 
 template<class T> 
@@ -138,4 +139,20 @@ l4 = -interval * (d_r * (d_v + l3) + d_b * (d_x + k3)) ;
     return 0.5 * 1.0 * d_v * d_v + 0.5 * d_b * d_x * d_x;
   }
 };
+
+class OscillatorBank
+{
+public:
+  OscillatorBank(double startFreq, double endFreq, double gap);
+
+  void feed(double val, double interval);
+  std::vector<std::pair<double, double> > get();
+private:
+  double d_startFreq;
+  double d_endFreq;
+  double d_gap;
+  std::vector<Oscillator<double>> d_bank;
+};
+
+
 #endif

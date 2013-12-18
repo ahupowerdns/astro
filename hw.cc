@@ -10,41 +10,7 @@
 using namespace std;
 using namespace CCfits;
 
-class OscillatorBank
-{
-public:
-  OscillatorBank(double startFreq, double endFreq, double gap);
 
-  void feed(double val, double interval);
-  vector<pair<double, double> > get();
-private:
-  double d_startFreq;
-  double d_endFreq;
-  double d_gap;
-  vector<Oscillator<double>> d_bank;
-};
-
-OscillatorBank::OscillatorBank(double startFreq, double endFreq, double gap)
-  : d_startFreq(startFreq), d_endFreq(endFreq), d_gap(gap)
-{
-  for(auto freq = startFreq; freq < endFreq; freq += gap) {
-    d_bank.push_back({freq, 10*freq/gap});
-  }
-}
-
-void OscillatorBank::feed(double val, double interval)
-{
-  for(auto& o : d_bank)
-    o.feed(val, interval);
-}
-
-vector<pair<double, double>> OscillatorBank::get()
-{
-  vector<pair<double,double>> ret;
-  for(auto& o : d_bank)
-    ret.push_back({o.d_freq, o.get()});
-  return ret;
-}
 
 int main(int argc, char**argv)
 {   
