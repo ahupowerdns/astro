@@ -10,21 +10,55 @@
 using namespace std;
 using namespace CCfits;
 
+struct Observation
+{
+  double t;
+  double rflux;
+  double flux;
+  double fixedFlux;
+  bool operator<(const Observation& rhs) const 
+  {
+    return t < rhs.t;
+  }
+
+  bool operator<(double theirT) const 
+  {
+    return t < theirT;
+  }
+};
+
+struct SignalInterpollator
+{
+  explicit SignalInterpollator(const vector<Observation>& obs)
+    : d_obs(obs)
+  {
+  }
+
+  double operator()(double t) const {
+    auto b=lower_bound(d_obs.begin(), d_obs.end(), t);
+    if(b == d_obs.begin() || b == d_obs.end())
+      return 0;
+    
+    auto a = b - 1;
+    if(a == d_obs.begin())
+      return 0;
+
+    double dt = (b->t - a-> t);
+    if(dt > 10) // makes little sense to interpollate over days
+      return 0;
+    double frac = (t - a->t) / (b->t - a-> t);
+    double val =  frac * b->fixedFlux + (1-frac)*a->fixedFlux;
+    //    cerr<<"t = "<<t<<", Frac: "<<frac<<", aVal: "<<a->fixedFlux<<", bVal: "<<b->fixedFlux<<", returning: "<<val<<endl;
+    return val;
+  }
+
+  const vector<Observation>& d_obs;
+};
+
 int main(int argc, char**argv)
 {   
   feenableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW); 
 
-  struct Observation
-  {
-    double jd;
-    double rflux;
-    double flux;
-    double fixedFlux;
-    bool operator<(const Observation& rhs) const 
-    {
-      return jd < rhs.jd;
-    }
-  };
   
   vector<Observation> obs;
 
@@ -57,12 +91,12 @@ int main(int argc, char**argv)
     for(unsigned int i=0; i < jd.size(); ++i) {
       if(std::isnan(jd[i]) || std::isnan(rflux[i]) || std::isnan(flux[i])) 
 	continue;
-      obs.push_back({jd[i], rflux[i], flux[i]});
+      obs.push_back({86.0*jd[i], rflux[i], flux[i]});
     }
 
   }
   sort(obs.begin(), obs.end());
-  cerr<< 86.4*obs.begin()->jd << " - "<< 86.4*obs.rbegin()->jd<<endl;
+  cerr<< "Kilosecond timespan: "<<obs.begin()->t << " - "<< obs.rbegin()->t<<endl;
 
   Observation* prev=0;
   double reflux=0, diff;
@@ -96,41 +130,53 @@ int main(int argc, char**argv)
     o.fixedFlux -= average;
   }
 
-  OscillatorBank ob(0.09, 0.160, 0.00005);
-
   vector<vector<pair<double, double> > > results;
-  
-  double y;
-  double beginTime = obs.begin()->jd*86.400;
-  double endTime = obs.rbegin()->jd*86.400; // kiloseconds
 
-  double step = 0.5; // 500 seconds
-  double t = obs.begin()->jd * 86.400;
-  auto o = obs.begin();
-  for(unsigned int n = 0; t < endTime; t=beginTime + n++*step) {
-    y=0;
-    while(o != obs.end() && t <= o->jd*86.400  && o->jd*86.400 < t+step) {
-      //      cout << 86.400*o->jd <<'\t'<<o->flux<<'\t'<<o->fixedFlux<<'\n';
-      y+= o->fixedFlux;
-      o++;
-    } 
-
-    //    y += 1000*(sin(2*M_PI*t*0.10)+sin(2*M_PI*t*0.11) + sin(2*M_PI*t*0.12));
-    ob.feed(y, step);
+  SignalInterpollator si(obs);
+  vector<HarmonicOscillatorFunctor<SignalInterpollator>> oscillators;
+  for(double f = 0.09; f< 0.160; f+=0.00005) {
+    oscillators.push_back({f, 10*f/0.00005, si});
+  }
   
-    if(!(n%150)) {
-      results.emplace_back(ob.get());
-    }
+  vector<double> otimes;
+  for(double t = obs.begin()->t ; t < obs.rbegin()->t; t += 86) {
+    otimes.push_back(t);
+  }
+  otimes.push_back(obs.rbegin()->t);
+
+  for(auto& o : oscillators) {
+    cerr<<"freq: "<<o.d_freq<<endl;
+
+    ofstream perfreq("perfreq/"+boost::lexical_cast<string>(o.d_freq));
+    typedef runge_kutta_cash_karp54< state_type > error_stepper_type;
+    
+    state_type x(2);
+    x[0] = 0.0; // start at x=0.0, p=0.0
+    x[1] = 0.0;
+
+    vector<pair<double, double> > column;
+    
+    integrate_times(make_controlled<error_stepper_type>(1.0e-7, 1.0e-5), 
+		    o, x, otimes.begin(), otimes.end(), 0.1,
+		    [&](const state_type& s, double t) {
+		      column.emplace_back(make_pair(
+						 o.d_freq, 
+						 o.d_freq*o.d_freq*(0.5*x[1]*x[1] + 0.5*x[0]*x[0]*o.d_b)/(o.d_q*o.d_q)
+						 ));
+		      
+		      perfreq << t << '\t' << o.d_freq*o.d_freq*(0.5*x[1]*x[1] + 0.5*x[0]*x[0]*o.d_b)/(o.d_q*o.d_q) << endl;
+		      perfreq.flush();
+		      
+		    });
+
+    
+    results.emplace_back(column);
   }
 
-  
-  
   double maxVal=0;
   vector<double> pixelhisto;
-  for(auto& row : results) 
-    for(auto& val: row) { 
-      //      if(val.second < 7e8)
-      // val.second=0;
+  for(auto& column : results) 
+    for(auto& val: column) { 
       maxVal=std::max(maxVal, val.second*val.second);
       pixelhisto.push_back(val.second);
     }
@@ -152,11 +198,11 @@ int main(int argc, char**argv)
   pixelhistofile.flush();
   ofstream plot("plot");
   
-  plot << "P6"<<"\n"<<results.begin()->size()<<" "<<results.size()<<"\n255\n";
-  
-  for(const auto& row : results) {
-    for(auto valpair: row) {
-      auto val = valpair.second;
+  plot << "P6"<<"\n"<<results.size()<<" "<<results.begin()->size()<<"\n255\n";
+
+  for(unsigned y=0; y < results.begin()->size(); ++y) {  
+    for(unsigned x=0; x < results.size(); ++x) {
+      auto val = results[x][y].second;
       double r = 2*val*val/maxVal;
       double g = 2*val*val/maxVal - 0.5;
       double b=  2*val*val/maxVal  -1;
@@ -173,16 +219,13 @@ int main(int argc, char**argv)
     }
   }
  
-  reverse(results.begin(), results.end());
-  
-  vector<pair<double, double> > avg(results.begin()->size());
-  for(unsigned int i =0 ; i < results.size()*0.9; ++i) {
-    auto& row = results[i];
-   
-    for(unsigned int j = 0 ; j < row.size() ; ++j) {
-      avg[j].second+=row[j].second;
-      if(!i)
-	avg[j].first=row[j].first; 
+  vector<pair<double, double> > avg(results.size());
+  for(unsigned int i =0 ; i < results.size(); ++i) {
+    auto& column = results[i];
+    
+    for(unsigned int j = 0.1*column.size() ; j < column.size() ; ++j) {
+      avg[i].second+=column[j].second;
+      avg[i].first=column[j].first; 
     }
   }
   for(unsigned int i = 0 ; i < avg.size(); ++i) {
@@ -191,6 +234,7 @@ int main(int argc, char**argv)
   }
   
 
+  ofstream td("topdistances");
   sort(avg.begin(), avg.end(), [](const pair<double, double>& first, 
 				  const pair<double, double>& second) {
 	 return first.second < second.second;
@@ -210,8 +254,40 @@ int main(int argc, char**argv)
   }
   sort(distances.begin(), distances.end());
   for(auto d : distances)
-    cout << d << endl;
-      
+    td << d << endl;      
 
   return 0;       
 }
+
+
+
+#if 0
+
+  OscillatorBank ob(0.09, 0.160, 0.00002);
+
+  vector<vector<pair<double, double> > > results;
+  
+  double y;
+  double beginTime = obs.begin()->t/1000;
+  double endTime = obs.rbegin()->t/1000; // kiloseconds
+
+  double step = 0.1; // 500 seconds
+  double t = obs.begin()->t;
+  auto o = obs.begin();
+  for(unsigned int n = 0; t < endTime; t=beginTime + n++*step) {
+    y=0;
+    while(o != obs.end() && t <= o->t  && o->t < t+step) {
+      //      cout << o->t/1000.0 <<'\t'<<o->flux<<'\t'<<o->fixedFlux<<'\n';
+      y+= o->fixedFlux;
+      o++;
+    } 
+
+    //    y += 1000*(sin(2*M_PI*t*0.10)+sin(2*M_PI*t*0.11) + sin(2*M_PI*t*0.12));
+    ob.feed(5*y, step);
+  
+    if(!(n%150)) {
+      results.emplace_back(ob.get());
+    }
+  }
+
+#endif

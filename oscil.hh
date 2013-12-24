@@ -4,6 +4,8 @@
 #include <iostream>
 #include <utility>
 #include <vector>
+#include "boost/numeric/odeint.hpp"
+
 using namespace std;
 
 template<class T> 
@@ -139,6 +141,56 @@ l4 = -interval * (d_r * (d_v + l3) + d_b * (d_x + k3)) ;
     return 0.5 * 1.0 * d_v * d_v + 0.5 * d_b * d_x * d_x;
   }
 };
+
+
+/* The type of container used to hold the state vector */
+typedef std::vector< double > state_type;
+
+struct FrequencyGenerator
+{
+  explicit FrequencyGenerator(double freq, double amplitude) : 
+    d_omega(2*M_PI*freq),
+    d_amplitude(amplitude)
+  {}
+
+  double operator()(double t) const
+  {
+    return d_amplitude*sin(d_omega*t);
+  }
+  
+  double d_omega;
+  double d_amplitude;
+};
+
+template<typename SignalGenerator>
+class HarmonicOscillatorFunctor
+{
+public:
+  HarmonicOscillatorFunctor(double freq, double q, const SignalGenerator& sg)
+    : d_generator(sg)
+  {
+    d_r = 2*M_PI*freq / q;  // oscillator frequency
+    d_b = 2*M_PI*2*M_PI*freq * freq / (1-(0.5/(q*q)));
+    d_freq = freq;
+    d_q = q;
+  }
+
+  void operator()(const state_type& x, state_type &dxdt, const double& t) const
+  {
+    dxdt[0] = x[1];                          // x[0] = position
+    dxdt[1] = -d_b*x[0] - d_r*x[1] + d_generator(t);   // x[1] = speed, dxdt = force
+  }
+
+
+  const SignalGenerator& d_generator;
+  double d_b;
+  double d_r;
+  double d_freq;
+  double d_q;
+};
+
+using namespace boost::numeric::odeint;
+
 
 class OscillatorBank
 {
