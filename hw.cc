@@ -25,26 +25,27 @@ struct Observation
   {
     return t < theirT;
   }
+
 };
 
-struct SignalInterpollator
+struct SignalInterpolator
 {
-  explicit SignalInterpollator(const vector<Observation>& obs)
-    : d_obs(obs)
+  explicit SignalInterpolator(const vector<Observation>& obs)
+    : d_obs(&obs)
   {
   }
 
   double operator()(double t) const {
-    auto b=lower_bound(d_obs.begin(), d_obs.end(), t);
-    if(b == d_obs.begin() || b == d_obs.end())
+    auto b=lower_bound(d_obs->begin(), d_obs->end(), t);
+    if(b == d_obs->begin() || b == d_obs->end())
       return 0;
     
     auto a = b - 1;
-    if(a == d_obs.begin())
+    if(a == d_obs->begin())
       return 0;
 
     double dt = (b->t - a-> t);
-    if(dt > 10) // makes little sense to interpollate over days
+    if(dt > 10) // makes little sense to interpolate over days
       return 0;
     double frac = (t - a->t) / (b->t - a-> t);
     double val =  frac * b->fixedFlux + (1-frac)*a->fixedFlux;
@@ -52,56 +53,113 @@ struct SignalInterpollator
     return val;
   }
 
-  const vector<Observation>& d_obs;
+  const vector<Observation>* d_obs;
 };
 
-int main(int argc, char**argv)
-{   
-  feenableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW); 
+
+struct CSplineSignalInterpolator
+{
+  explicit CSplineSignalInterpolator(const vector<Observation>& obs)
+    : d_obs(&obs)
+  {
+    double p, qn, sig, un;
+
+    int n=obs.size();
+    vector<double> u(n-1);
+    d_y2.resize(n);
+
+    d_y2[0]=u[0]=0.0;
+    for (int i=1;i<n-1;i++) {
+      sig=(obs[i].t - obs[i-1].t)/(obs[i+1].t - obs[i-1].t);
+      p=sig*d_y2[i-1]+2.0;
+      d_y2[i]=(sig-1.0)/p;
+      u[i]=(obs[i+1].fixedFlux - obs[i].fixedFlux)/(obs[i+1].t-obs[i].t) - 
+	(obs[i].fixedFlux - obs[i-1].fixedFlux)/(obs[i].t - obs[i-1].t);
+      u[i]=(6.0*u[i]/(obs[i+1].t- obs[i-1].t)-sig*u[i-1])/p;
+    }
+    
+    qn=un=0.0;
+    d_y2[n-1]=(un-qn*u[n-2])/(qn*d_y2[n-2]+1.0);
+    for (int k=n-2;k>=0;k--)
+      d_y2[k]=d_y2[k] * d_y2[k+1]+u[k];
+  }
+
+  double operator()(double t) const {
+    auto hi=lower_bound(d_obs->begin(), d_obs->end(), t);
+    if(hi == d_obs->begin() || hi == d_obs->end())
+      return 0;
+    
+    auto lo = hi - 1;
+    if(lo == d_obs->begin())
+      return 0;
+
+    double h=hi->t - lo->t;
+    if(h > 10) // makes little sense to interpolate over days
+      return 0;
+
+    //    if (h == 0.0) nrerror("Bad xa input to routine splint");
+    double a=(hi->t - t)/h;
+    double b=(t - lo->t)/h;
+    return a*lo->fixedFlux + b*hi->fixedFlux +((a*a*a-a)* d_y2[lo - d_obs->begin()]
+					       +(b*b*b-b)*d_y2[hi - d_obs->begin()])*(h*h)/6.0;
+  }
+
+  const vector<Observation>* d_obs;
+  vector<double> d_y2;
+};
+
+
+class KeplerLightCurve
+{
+public:
+  void addFits(const std::string& fname);
+  void sort();
+  void removeJumps();
+  void removeDC();
+  vector<Observation> d_obs;
+};
+
+void KeplerLightCurve::addFits(const std::string& fname)
+{
+  cerr<<fname<<endl;
+  CCfits::FITS pInfile(fname, Read); 
+
+  ExtHDU& table = pInfile.extension(1);
+    
+  // read all the keywords, excluding those associated with columns.
+    
+  table.readAllKeys();
+  
+  std::vector <double> flux;
+  table.column("PDCSAP_FLUX").read(flux, 0, table.rows());
+  
+  std::vector <double> rflux;
+  table.column("SAP_FLUX").read(rflux, 0, table.rows());
+    
+  std::vector <double> jd;
+  table.column("TIME").read(jd, 0, table.rows());
+    
+  for(unsigned int i=0; i < jd.size(); ++i) {
+    if(std::isnan(jd[i]) || std::isnan(rflux[i]) || std::isnan(flux[i])) 
+      continue;
+    d_obs.push_back({86.0*jd[i], rflux[i], flux[i]});
+  }
 
   
-  vector<Observation> obs;
+}
 
-  for(int fnum = 1; fnum < argc; ++fnum) {
-    const char* fname=argv[fnum];
-    cerr<<fname<<endl;
-    CCfits::FITS pInfile(fname, Read); 
+void KeplerLightCurve::sort()
+{
+  ::sort(d_obs.begin(), d_obs.end());
+  cerr<< "Kilosecond timespan: "<<d_obs.begin()->t << " - "<< d_obs.rbegin()->t<<endl;
+}
 
-    // define a reference for clarity. (std::auto_ptr<T>::get returns a pointer
-
-    ExtHDU& table = pInfile.extension(1);
-    
-    // read all the keywords, excluding those associated with columns.
-    
-    table.readAllKeys();
-    
-    // print the result.
-    
-    //  std::cout << table << std::endl;
-    std::vector <double> flux;
-    table.column("PDCSAP_FLUX").read(flux, 0, table.rows());
-
-    std::vector <double> rflux;
-    table.column("SAP_FLUX").read(rflux, 0, table.rows());
-
-
-    std::vector <double> jd;
-    table.column("TIME").read(jd, 0, table.rows());
-    
-    for(unsigned int i=0; i < jd.size(); ++i) {
-      if(std::isnan(jd[i]) || std::isnan(rflux[i]) || std::isnan(flux[i])) 
-	continue;
-      obs.push_back({86.0*jd[i], rflux[i], flux[i]});
-    }
-
-  }
-  sort(obs.begin(), obs.end());
-  cerr<< "Kilosecond timespan: "<<obs.begin()->t << " - "<< obs.rbegin()->t<<endl;
-
+void KeplerLightCurve::removeJumps()
+{
   Observation* prev=0;
   double reflux=0, diff;
   unsigned int skips=0;
-  for(auto& o : obs) {
+  for(auto& o : d_obs) {
     if(!prev) {
       prev = &o;
       continue;
@@ -119,30 +177,63 @@ int main(int argc, char**argv)
   prev->fixedFlux = reflux;
   cerr<<"Skipped "<<skips<<" implausible jumps"<<endl;
 
+}
+
+void KeplerLightCurve::removeDC()
+{
   double tot=0;
-  for(auto& o : obs) {
+  for(auto& o : d_obs) {
     tot += o.fixedFlux;
   }
-  double average=tot/obs.size();
+  double average=tot/d_obs.size();
   cerr<<"Average: "<<average<<endl;
 
-  for(auto& o : obs) {
+  for(auto& o : d_obs) {
     o.fixedFlux -= average;
   }
+}
+
+int main(int argc, char**argv)
+{   
+  feenableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW); 
+  KeplerLightCurve klc;
+
+  for(int fnum = 1; fnum < argc; ++fnum) {
+    klc.addFits(argv[fnum]);
+  }
+  klc.sort();
+
+  klc.removeJumps();
+  klc.removeDC();
+
 
   vector<vector<pair<double, double> > > results;
 
-  SignalInterpollator si(obs);
-  vector<HarmonicOscillatorFunctor<SignalInterpollator>> oscillators;
+  CSplineSignalInterpolator si(klc.d_obs);
+#if 0  
+  ofstream r("real");
+  for(auto& o : klc.d_obs) {
+    r << o.t << '\t' << o.fixedFlux<<'\n';
+  }
+  r.flush();
+
+  ofstream inter("inter");
+  for(auto t = klc.d_obs.begin()->t; t < klc.d_obs.rbegin()->t; t+=0.5) {
+    inter << t << '\t' << si(t) << '\n';
+  }
+  return 0;
+#endif
+ 
+  vector<HarmonicOscillatorFunctor<CSplineSignalInterpolator>> oscillators;
   for(double f = 0.09; f< 0.160; f+=0.00005) {
-    oscillators.push_back({f, 10*f/0.00005, si});
+    oscillators.push_back({f, 20*f/0.00005, si});
   }
   
   vector<double> otimes;
-  for(double t = obs.begin()->t ; t < obs.rbegin()->t; t += 86) {
+  for(double t = klc.d_obs.begin()->t ; t < klc.d_obs.rbegin()->t; t += 86) {
     otimes.push_back(t);
   }
-  otimes.push_back(obs.rbegin()->t);
+  otimes.push_back(klc.d_obs.rbegin()->t);
 
   for(auto& o : oscillators) {
     cerr<<"freq: "<<o.d_freq<<endl;
@@ -268,15 +359,15 @@ int main(int argc, char**argv)
   vector<vector<pair<double, double> > > results;
   
   double y;
-  double beginTime = obs.begin()->t/1000;
-  double endTime = obs.rbegin()->t/1000; // kiloseconds
+  double beginTime = klc.d_obs.begin()->t/1000;
+  double endTime = klc.d_obs.rbegin()->t/1000; // kiloseconds
 
   double step = 0.1; // 500 seconds
-  double t = obs.begin()->t;
-  auto o = obs.begin();
+  double t = klc.d_obs.begin()->t;
+  auto o = klc.d_obs.begin();
   for(unsigned int n = 0; t < endTime; t=beginTime + n++*step) {
     y=0;
-    while(o != obs.end() && t <= o->t  && o->t < t+step) {
+    while(o != klc.d_obs.end() && t <= o->t  && o->t < t+step) {
       //      cout << o->t/1000.0 <<'\t'<<o->flux<<'\t'<<o->fixedFlux<<'\n';
       y+= o->fixedFlux;
       o++;

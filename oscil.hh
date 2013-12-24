@@ -167,22 +167,22 @@ class HarmonicOscillatorFunctor
 {
 public:
   HarmonicOscillatorFunctor(double freq, double q, const SignalGenerator& sg)
-    : d_generator(sg)
+    : d_generator(&sg)
   {
     d_r = 2*M_PI*freq / q;  // oscillator frequency
     d_b = 2*M_PI*2*M_PI*freq * freq / (1-(0.5/(q*q)));
     d_freq = freq;
     d_q = q;
   }
-
+  
   void operator()(const state_type& x, state_type &dxdt, const double& t) const
   {
     dxdt[0] = x[1];                          // x[0] = position
-    dxdt[1] = -d_b*x[0] - d_r*x[1] + d_generator(t);   // x[1] = speed, dxdt = force
+    dxdt[1] = -d_b*x[0] - d_r*x[1] + (*d_generator)(t);   // x[1] = speed, dxdt = force
   }
 
 
-  const SignalGenerator& d_generator;
+  const SignalGenerator* d_generator;
   double d_b;
   double d_r;
   double d_freq;
@@ -190,7 +190,6 @@ public:
 };
 
 using namespace boost::numeric::odeint;
-
 
 class OscillatorBank
 {
