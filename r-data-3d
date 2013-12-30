@@ -1,0 +1,6 @@
+> library(reshape2)
+> library(rgl)
+> data <- read.table("3dplot", sep="\t")
+> names(data) <- c("y","z","x")
+> tmp <- acast(data, x ~ y, value.var="z")
+> persp3d(tmp)

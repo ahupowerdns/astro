@@ -5,6 +5,7 @@
 #include <fstream>
 #include "oscil.hh"
 #include <fenv.h> 
+#include <future>
 #include <utility>
 
 using namespace std;
@@ -116,6 +117,7 @@ public:
   void sort();
   void removeJumps();
   void removeDC();
+  void plot(const std::string& fname);
   vector<Observation> d_obs;
 };
 
@@ -152,6 +154,14 @@ void KeplerLightCurve::sort()
 {
   ::sort(d_obs.begin(), d_obs.end());
   cerr<< "Kilosecond timespan: "<<d_obs.begin()->t << " - "<< d_obs.rbegin()->t<<endl;
+}
+
+void KeplerLightCurve::plot(const std::string& fname)
+{
+  ofstream of(fname);
+  of << std::fixed;
+  for(const auto& o : d_obs) 
+    of << o.t*1000.0 << '\t' << o.fixedFlux<<'\n';
 }
 
 void KeplerLightCurve::removeJumps()
@@ -193,6 +203,39 @@ void KeplerLightCurve::removeDC()
   }
 }
 
+typedef HarmonicOscillatorFunctor<CSplineSignalInterpolator> oscil_t;
+
+vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
+{
+  cerr<<"freq: "<<o.d_freq<<endl;
+  
+  ofstream perfreq("perfreq/"+boost::lexical_cast<string>(o.d_freq));
+  typedef runge_kutta_cash_karp54< state_type > error_stepper_type;
+  
+  state_type x(2);
+  x[0] = 0.0; // start at x=0.0, p=0.0
+  x[1] = 0.0;
+  
+  vector<pair<double, double> > column;
+  
+  integrate_times(make_controlled<error_stepper_type>(1, 1.0e-8), 
+		  o, x, otimes.begin(), otimes.end(), 0.1,
+		  [&](const state_type& s, double t) {
+		    column.emplace_back(make_pair(
+						  o.d_freq, 
+						  o.d_freq*o.d_freq*(0.5*x[1]*x[1] + 0.5*x[0]*x[0]*o.d_b)/(o.d_q*o.d_q)
+						  ));
+		    
+		    perfreq << t << '\t' << o.d_freq*o.d_freq*(0.5*x[1]*x[1] + 0.5*x[0]*x[0]*o.d_b)/(o.d_q*o.d_q) << '\t' << o.d_freq << endl;
+		    perfreq.flush();
+		    
+		  });
+  
+  
+  return column;
+}
+
+
 int main(int argc, char**argv)
 {   
   feenableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW); 
@@ -205,8 +248,7 @@ int main(int argc, char**argv)
 
   klc.removeJumps();
   klc.removeDC();
-
-
+  klc.plot("fits.plot");
   vector<vector<pair<double, double> > > results;
 
   CSplineSignalInterpolator si(klc.d_obs);
@@ -224,44 +266,43 @@ int main(int argc, char**argv)
   return 0;
 #endif
  
-  vector<HarmonicOscillatorFunctor<CSplineSignalInterpolator>> oscillators;
+  vector<oscil_t> oscillators;
   for(double f = 0.09; f< 0.160; f+=0.00005) {
-    oscillators.push_back({f, 20*f/0.00005, si});
+    oscillators.push_back({f, 10*f/0.00005, si});
   }
-  
+
   vector<double> otimes;
   for(double t = klc.d_obs.begin()->t ; t < klc.d_obs.rbegin()->t; t += 86) {
     otimes.push_back(t);
   }
   otimes.push_back(klc.d_obs.rbegin()->t);
+  
+  auto doPart=[&](vector<oscil_t>::iterator begin, vector<oscil_t>::iterator end) {
+    vector<vector<pair<double, double> > > ret;
+    for(auto iter= begin; iter != end; ++iter) {
+      auto column = doFreq(*iter, otimes);
+      ret.emplace_back(column);
+    }
+    return ret;
+  };
 
-  for(auto& o : oscillators) {
-    cerr<<"freq: "<<o.d_freq<<endl;
+  vector<decltype(std::async(std::launch::async, doPart, oscillators.begin(), oscillators.begin()+oscillators.size()/4))> futures;
+  futures.emplace_back(std::async(std::launch::async, doPart, oscillators.begin(), oscillators.begin()+oscillators.size()/4));
 
-    ofstream perfreq("perfreq/"+boost::lexical_cast<string>(o.d_freq));
-    typedef runge_kutta_cash_karp54< state_type > error_stepper_type;
-    
-    state_type x(2);
-    x[0] = 0.0; // start at x=0.0, p=0.0
-    x[1] = 0.0;
+  futures.push_back(std::async(std::launch::async, 
+			       doPart, oscillators.begin()+oscillators.size()/4, oscillators.begin()+oscillators.size()/2));
 
-    vector<pair<double, double> > column;
-    
-    integrate_times(make_controlled<error_stepper_type>(1.0e-7, 1.0e-5), 
-		    o, x, otimes.begin(), otimes.end(), 0.1,
-		    [&](const state_type& s, double t) {
-		      column.emplace_back(make_pair(
-						 o.d_freq, 
-						 o.d_freq*o.d_freq*(0.5*x[1]*x[1] + 0.5*x[0]*x[0]*o.d_b)/(o.d_q*o.d_q)
-						 ));
-		      
-		      perfreq << t << '\t' << o.d_freq*o.d_freq*(0.5*x[1]*x[1] + 0.5*x[0]*x[0]*o.d_b)/(o.d_q*o.d_q) << endl;
-		      perfreq.flush();
-		      
-		    });
+  futures.push_back(std::async(std::launch::async, 
+			       doPart, oscillators.begin()+oscillators.size()/2, oscillators.begin()+3*oscillators.size()/4));
 
-    
-    results.emplace_back(column);
+  futures.push_back(std::async(std::launch::async, 
+			       doPart, oscillators.begin()+3*oscillators.size()/4, oscillators.end()));
+
+		    
+  for(auto& future : futures) {
+    auto part=future.get();
+    for(auto& p: part)
+      results.push_back(p);
   }
 
   double maxVal=0;
@@ -309,21 +350,29 @@ int main(int argc, char**argv)
       plot << (char)(255*b);
     }
   }
- 
-  vector<pair<double, double> > avg(results.size());
-  for(unsigned int i =0 ; i < results.size(); ++i) {
-    auto& column = results[i];
+
+  for(double begin=0.0; begin < 1; begin += 0.1) {
+    ofstream pplot("power."+boost::lexical_cast<string>((int)(begin*10)));
+    vector<pair<double, double> > avg(results.size());
+
+    for(unsigned int i =0 ; i < results.size(); ++i) {
+      auto& column = results[i];
+      
+      for(unsigned int j = begin*column.size() ; j < (begin+0.1)*column.size() && j < column.size() ; ++j) {
+	avg[i].second+=column[j].second;
+	avg[i].first=column[j].first; 
+      }
+      
+    }
     
-    for(unsigned int j = 0.1*column.size() ; j < column.size() ; ++j) {
-      avg[i].second+=column[j].second;
-      avg[i].first=column[j].first; 
+    for(unsigned int i = 0 ; i < avg.size(); ++i) {
+      pplot << avg[i].first << "\t";
+      pplot<<avg[i].second/results.size()<<endl;
     }
   }
-  for(unsigned int i = 0 ; i < avg.size(); ++i) {
-    cout << avg[i].first << "\t";
-    cout<<avg[i].second/results.size()<<endl;
-  }
-  
+
+
+#if 0
 
   ofstream td("topdistances");
   sort(avg.begin(), avg.end(), [](const pair<double, double>& first, 
@@ -347,6 +396,7 @@ int main(int argc, char**argv)
   for(auto d : distances)
     td << d << endl;      
 
+#endif
   return 0;       
 }
 
