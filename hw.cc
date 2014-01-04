@@ -203,6 +203,22 @@ void KeplerLightCurve::removeDC()
   }
 }
 
+
+/* we have time values and for each time value numbers per frequency.
+   We can promise we'll only add new time values in ascending order.
+*/
+
+class TwoDLabelledArray
+{
+private:
+  struct Row
+  {
+    double t;
+    vector<double> values;
+  };
+  vector<Row> d_rows;
+};
+
 typedef HarmonicOscillatorFunctor<CSplineSignalInterpolator> oscil_t;
 
 vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
@@ -236,6 +252,58 @@ vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
 }
 
 
+vector<pair<double, double> > emitPowerGraph(double start, double stop, int index,  const vector<vector<pair<double, double> > >& results)
+{
+  vector<pair<double, double> > ret;
+  ofstream pplot("power."+boost::lexical_cast<string>(index));
+  vector<pair<double, double> > avg(results.size());
+
+  unsigned int count=0;
+  for(unsigned int i =0 ; i < results.size(); ++i) {
+    const auto& column = results[i];
+      
+    for(unsigned int j = start*column.size() ; j < stop*column.size() && j < column.size() ; ++j) {
+      avg[i].second+=column[j].second;
+      avg[i].first=column[j].first; 
+      count++;
+    }
+    
+  }
+    
+  for(unsigned int i = 0 ; i < avg.size(); ++i) {
+    pplot << avg[i].first << "\t";
+    pplot<<avg[i].second/count <<endl;
+    ret.push_back({avg[i].first,  avg[i].second/count});
+  }
+  return ret;
+}
+
+template<typename T>
+vector<pair<typename T::iterator, typename T::iterator> >
+splitRange(T& container, int parts)
+{
+  typedef pair<typename T::iterator, typename T::iterator> range_t;
+  vector<range_t > ret;
+  range_t range;
+  typename T::size_type stride = container.size()/parts;
+
+  for(int n=0; n < parts; ++n) {
+    if(!n)
+      range.first = container.begin();
+    else
+      range.first = range.second;
+
+    if(n+1 == parts)
+      range.second = container.end();
+    else
+      range.second = range.first + stride;
+      
+    ret.push_back(range);
+  }
+  
+  return ret;
+}
+
 int main(int argc, char**argv)
 {   
   feenableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW); 
@@ -268,7 +336,7 @@ int main(int argc, char**argv)
  
   vector<oscil_t> oscillators;
   for(double f = 0.09; f< 0.160; f+=0.00005) {
-    oscillators.push_back({f, 10*f/0.00005, si});
+    oscillators.push_back({f, 20*f/0.00005, si});
   }
 
   vector<double> otimes;
@@ -286,19 +354,13 @@ int main(int argc, char**argv)
     return ret;
   };
 
-  vector<decltype(std::async(std::launch::async, doPart, oscillators.begin(), oscillators.begin()+oscillators.size()/4))> futures;
-  futures.emplace_back(std::async(std::launch::async, doPart, oscillators.begin(), oscillators.begin()+oscillators.size()/4));
+  vector<decltype(std::async(std::launch::async, doPart, oscillators.begin(), oscillators.end()))> futures;
 
-  futures.push_back(std::async(std::launch::async, 
-			       doPart, oscillators.begin()+oscillators.size()/4, oscillators.begin()+oscillators.size()/2));
+  for(auto& s : splitRange(oscillators, 4)) {
+    futures.emplace_back(std::async(std::launch::async, doPart, s.first, s.second));
+  }
 
-  futures.push_back(std::async(std::launch::async, 
-			       doPart, oscillators.begin()+oscillators.size()/2, oscillators.begin()+3*oscillators.size()/4));
-
-  futures.push_back(std::async(std::launch::async, 
-			       doPart, oscillators.begin()+3*oscillators.size()/4, oscillators.end()));
-
-		    
+  
   for(auto& future : futures) {
     auto part=future.get();
     for(auto& p: part)
@@ -351,52 +413,25 @@ int main(int argc, char**argv)
     }
   }
 
-  for(double begin=0.0; begin < 1; begin += 0.1) {
-    ofstream pplot("power."+boost::lexical_cast<string>((int)(begin*10)));
-    vector<pair<double, double> > avg(results.size());
+  
+  for(int n=1; n <11; ++n) 
+    emitPowerGraph((n-1)*0.1, n*0.1, n, results);
+  emitPowerGraph(0.0, 1.0, 0, results);
+  emitPowerGraph(0.1, 1.0, 100, results);
+  emitPowerGraph(0.1, 1.0, 10100, results);
+  emitPowerGraph(0.2, 1.0, 20100, results);
+  auto graph = emitPowerGraph(0.4, 1.0, 40100, results);
+  sort(graph.begin(), graph.end(), 
+       [](const pair<double, double>& a, const pair<double, double>& b) 
+       {
+	 return a.second < b.second;
+       }
+       );
 
-    for(unsigned int i =0 ; i < results.size(); ++i) {
-      auto& column = results[i];
-      
-      for(unsigned int j = begin*column.size() ; j < (begin+0.1)*column.size() && j < column.size() ; ++j) {
-	avg[i].second+=column[j].second;
-	avg[i].first=column[j].first; 
-      }
-      
-    }
-    
-    for(unsigned int i = 0 ; i < avg.size(); ++i) {
-      pplot << avg[i].first << "\t";
-      pplot<<avg[i].second/results.size()<<endl;
-    }
+  ofstream peaks("peaks");
+  for(auto peak : graph) {
+    peaks << peak.first<<'\t' << peak.second<< '\n';
   }
-
-
-#if 0
-
-  ofstream td("topdistances");
-  sort(avg.begin(), avg.end(), [](const pair<double, double>& first, 
-				  const pair<double, double>& second) {
-	 return first.second < second.second;
-       });
-
-  vector<double> topFreqs;
-  unsigned int i=0;
-  for(auto iter = avg.rbegin(); iter != avg.rend() && i< 20; ++i, ++iter) 
-    topFreqs.push_back(iter->first);
-
-  vector<double> distances;
-  for(auto a : topFreqs) {
-    for(auto b : topFreqs) {
-      if(a<b)
-	distances.push_back(b-a);
-    }
-  }
-  sort(distances.begin(), distances.end());
-  for(auto d : distances)
-    td << d << endl;      
-
-#endif
   return 0;       
 }
 
