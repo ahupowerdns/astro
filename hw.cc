@@ -86,23 +86,30 @@ struct CSplineSignalInterpolator
   }
 
   double operator()(double t) const {
+
     auto hi=lower_bound(d_obs->begin(), d_obs->end(), t);
     if(hi == d_obs->begin() || hi == d_obs->end())
       return 0;
     
     auto lo = hi - 1;
-    if(lo == d_obs->begin())
+    if(lo == d_obs->begin()) {
+      //      cout << t << '\t' << 0 << '\n';
       return 0;
+    }
 
     double h=hi->t - lo->t;
-    if(h > 10) // makes little sense to interpolate over days
+    if(h > 10) {// makes little sense to interpolate over days
+      //      cout << t << '\t' << 0 << '\n';
       return 0;
+    }
 
     //    if (h == 0.0) nrerror("Bad xa input to routine splint");
     double a=(hi->t - t)/h;
     double b=(t - lo->t)/h;
-    return a*lo->fixedFlux + b*hi->fixedFlux +((a*a*a-a)* d_y2[lo - d_obs->begin()]
-					       +(b*b*b-b)*d_y2[hi - d_obs->begin()])*(h*h)/6.0;
+    double ret= a*lo->fixedFlux + b*hi->fixedFlux +((a*a*a-a)* d_y2[lo - d_obs->begin()]
+						    +(b*b*b-b)*d_y2[hi - d_obs->begin()])*(h*h)/6.0;
+    // cout << t << '\t\ << ret << '\n';
+    return ret;
   }
 
   const vector<Observation>* d_obs;
@@ -234,7 +241,7 @@ vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
   
   vector<pair<double, double> > column;
   
-  integrate_times(make_controlled<error_stepper_type>(1, 1.0e-8), 
+  integrate_times(make_controlled<error_stepper_type>(1e-1, 1.0e-8), 
 		  o, x, otimes.begin(), otimes.end(), 0.1,
 		  [&](const state_type& s, double t) {
 		    column.emplace_back(make_pair(
@@ -242,7 +249,7 @@ vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
 						  o.d_freq*o.d_freq*(0.5*x[1]*x[1] + 0.5*x[0]*x[0]*o.d_b)/(o.d_q*o.d_q)
 						  ));
 		    
-		    perfreq << t << '\t' << o.d_freq*o.d_freq*(0.5*x[1]*x[1] + 0.5*x[0]*x[0]*o.d_b)/(o.d_q*o.d_q) << '\t' << o.d_freq << endl;
+		    perfreq << t << '\t' << o.d_freq*o.d_freq*(0.5*x[1]*x[1] + 0.5*x[0]*x[0]*o.d_b)/(o.d_q*o.d_q) << '\t' << x[0] << '\t' << x[1]<<'\t'<<o.d_b<<endl;
 		    perfreq.flush();
 		    
 		  });
@@ -320,7 +327,7 @@ int main(int argc, char**argv)
   vector<vector<pair<double, double> > > results;
 
   CSplineSignalInterpolator si(klc.d_obs);
-#if 0  
+#if 0
   ofstream r("real");
   for(auto& o : klc.d_obs) {
     r << o.t << '\t' << o.fixedFlux<<'\n';
@@ -331,19 +338,26 @@ int main(int argc, char**argv)
   for(auto t = klc.d_obs.begin()->t; t < klc.d_obs.rbegin()->t; t+=0.5) {
     inter << t << '\t' << si(t) << '\n';
   }
-  return 0;
-#endif
- 
-  vector<oscil_t> oscillators;
-  for(double f = 0.09; f< 0.160; f+=0.00005) {
-    oscillators.push_back({f, 20*f/0.00005, si});
-  }
+ #endif
+
 
   vector<double> otimes;
   for(double t = klc.d_obs.begin()->t ; t < klc.d_obs.rbegin()->t; t += 86) {
     otimes.push_back(t);
   }
   otimes.push_back(klc.d_obs.rbegin()->t);
+#if 0
+  double f=0.15791000000000191;
+  oscil_t o(f, 20.0*f/0.00005, si);
+  doFreq(o, otimes);
+  return 0;
+#endif
+
+  vector<oscil_t> oscillators;
+  for(double f = 0.09; f< 0.16; f+=0.00001) {
+    oscillators.push_back({f, 20*f/0.00005, si});
+  }
+
   
   auto doPart=[&](vector<oscil_t>::iterator begin, vector<oscil_t>::iterator end) {
     vector<vector<pair<double, double> > > ret;
