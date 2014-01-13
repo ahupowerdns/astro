@@ -7,6 +7,7 @@
 #include <fenv.h> 
 #include <future>
 #include <utility>
+#include <fftw3.h>
 
 using namespace std;
 using namespace CCfits;
@@ -254,7 +255,27 @@ vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
 		    
 		  });
   
+  vector<double> forfft;
+  forfft.reserve(column.size());
+  for(const auto& ent : column)
+   forfft.push_back(ent.second);
+
+  int nc = (forfft.size()/2+1) ;
+  fftw_complex *out = (fftw_complex*)fftw_malloc ( sizeof ( fftw_complex ) * nc );
   
+  auto plan_forward = fftw_plan_dft_r2c_1d ( forfft.size(), &forfft[0], out, FFTW_ESTIMATE );
+  fftw_execute ( plan_forward );
+  vector<double> power;
+  for(int n = 0 ; n < nc ; ++n) {
+
+   power.push_back(sqrt(out[n][0]*out[n][0] + out[n][1]*out[n][1]));
+  }
+  fftw_free(out);
+  ofstream powfile("perfreq/"+boost::lexical_cast<string>(o.d_freq)+".power");
+  for(unsigned int n =0 ; n < power.size() ; ++n)
+    powfile << n <<'\t' << power[n]<<'\n';
+    
+
   return column;
 }
 
