@@ -1,7 +1,7 @@
 -include sysdeps/$(shell uname).inc
 
 VERSION=0.1
-CXXFLAGS=-Wall -Iodeint-v2 -MMD -MP  $(CXX2011FLAGS) -ggdb # -Wno-unused-local-typedefs 
+CXXFLAGS=-Wall -Iodeint-v2 -MMD -MP  $(CXX2011FLAGS) -O3 # -Wno-unused-local-typedefs 
 CFLAGS=-Wall -Iodeint-v2 -O3 -MMD -MP
 LDFLAGS=$(CXX2011FLAGS)  
 CHEAT_ARG := $(shell ./update-git-hash-if-necessary)

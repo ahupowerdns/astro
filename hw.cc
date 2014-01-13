@@ -8,6 +8,8 @@
 #include <future>
 #include <utility>
 #include <fftw3.h>
+#include <boost/circular_buffer.hpp>
+#include "misc.hh"
 
 using namespace std;
 using namespace CCfits;
@@ -212,6 +214,17 @@ void KeplerLightCurve::removeDC()
 }
 
 
+void normalize(vector<double>& values)
+{
+  double tot = 0;
+  for(const auto& val : values)
+    tot+=val;
+  const double average = tot/values.size();
+
+  for(auto& val : values)
+    val /= average;  
+}
+
 /* we have time values and for each time value numbers per frequency.
    We can promise we'll only add new time values in ascending order.
 */
@@ -228,7 +241,7 @@ private:
 };
 
 typedef HarmonicOscillatorFunctor<CSplineSignalInterpolator> oscil_t;
-
+pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
 {
   cerr<<"freq: "<<o.d_freq<<endl;
@@ -241,18 +254,37 @@ vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
   x[1] = 0.0;
   
   vector<pair<double, double> > column;
-  
+  boost::circular_buffer<double> ringbuf(150);  
+  double unlikely=1;
   integrate_times(make_controlled<error_stepper_type>(1e-1, 1.0e-8), 
 		  o, x, otimes.begin(), otimes.end(), 0.1,
 		  [&](const state_type& s, double t) {
+		    double power = o.d_freq*o.d_freq*(0.5*x[1]*x[1] + 0.5*x[0]*x[0]*o.d_b)/(o.d_q*o.d_q);
+		    ringbuf.push_back(power);
+
 		    column.emplace_back(make_pair(
 						  o.d_freq, 
-						  o.d_freq*o.d_freq*(0.5*x[1]*x[1] + 0.5*x[0]*x[0]*o.d_b)/(o.d_q*o.d_q)
+						  power
 						  ));
 		    
-		    perfreq << t << '\t' << o.d_freq*o.d_freq*(0.5*x[1]*x[1] + 0.5*x[0]*x[0]*o.d_b)/(o.d_q*o.d_q) << '\t' << x[0] << '\t' << x[1]<<'\t'<<o.d_b<<endl;
-		    perfreq.flush();
-		    
+
+		    VarMeanEstimator vme;
+		    for(auto& val : ringbuf) {
+		      vme(val);
+		    }
+
+		    perfreq << t << '\t' << power << '\t';
+		    if(ringbuf.size() > 5) {
+		      double sigma = mean(vme)/sqrt(2*variance(vme));
+		      perfreq << mean(vme) << '\t' << variance(vme) << '\t' << sigma << endl;
+		      if(sigma > 4)
+			unlikely*= 1.1;
+		      else
+			unlikely*=0.9;
+		    }
+		    else
+		      perfreq << "0\t0\t0"<<endl;
+		    perfreq.flush();		    
 		  });
   
   vector<double> forfft;
@@ -263,19 +295,41 @@ vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
   int nc = (forfft.size()/2+1) ;
   fftw_complex *out = (fftw_complex*)fftw_malloc ( sizeof ( fftw_complex ) * nc );
   
+  pthread_mutex_lock(&g_lock); // seriously, they need this
   auto plan_forward = fftw_plan_dft_r2c_1d ( forfft.size(), &forfft[0], out, FFTW_ESTIMATE );
+  pthread_mutex_unlock(&g_lock); // so sad
   fftw_execute ( plan_forward );
   vector<double> power;
   for(int n = 0 ; n < nc ; ++n) {
-
    power.push_back(sqrt(out[n][0]*out[n][0] + out[n][1]*out[n][1]));
   }
   fftw_free(out);
+  normalize(power);
   ofstream powfile("perfreq/"+boost::lexical_cast<string>(o.d_freq)+".power");
-  for(unsigned int n =0 ; n < power.size() ; ++n)
+  double q[5]={0,0,0,0,0};
+  for(unsigned int n =0 ; n < power.size() ; ++n) {
     powfile << n <<'\t' << power[n]<<'\n';
+    if(n < 5)
+      q[0]+=power[n];
+    else
+      if(n < 10)
+	q[1]+=power[n];
+      else if(n<50)
+	q[2]+=power[n];
+      else if(n<100)
+	q[3]+=power[n];
+      else
+	q[4]+=power[n];
+      
+      
+  }
     
-
+  perfreq << " # unlikely score: "<<unlikely<<endl;
+  perfreq << " # quartile powers ";
+  for(auto n : {0,1,2,3,4})
+    perfreq << q[n] << '\t';
+  perfreq <<endl;
+  
   return column;
 }
 
@@ -375,7 +429,7 @@ int main(int argc, char**argv)
 #endif
 
   vector<oscil_t> oscillators;
-  for(double f = 0.09; f< 0.16; f+=0.00001) {
+  for(double f = 0.09; f< 0.160; f+=0.00001) {
     oscillators.push_back({f, 20*f/0.00005, si});
   }
 
@@ -390,6 +444,8 @@ int main(int argc, char**argv)
   };
 
   vector<decltype(std::async(std::launch::async, doPart, oscillators.begin(), oscillators.end()))> futures;
+
+  //  doPart(oscillators.begin(), oscillators.end());
 
   for(auto& s : splitRange(oscillators, 4)) {
     futures.emplace_back(std::async(std::launch::async, doPart, s.first, s.second));
