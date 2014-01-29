@@ -8,6 +8,7 @@
 #include <future>
 #include <utility>
 #include <fftw3.h>
+#include <boost/algorithm/string.hpp>
 #include <boost/circular_buffer.hpp>
 #include "misc.hh"
 
@@ -124,6 +125,7 @@ class KeplerLightCurve
 {
 public:
   void addFits(const std::string& fname);
+  void addTxt(const std::string& fname);
   void sort();
   void removeJumps();
   void removeDC();
@@ -156,8 +158,28 @@ void KeplerLightCurve::addFits(const std::string& fname)
       continue;
     d_obs.push_back({86.0*jd[i], rflux[i], flux[i]});
   }
+}
 
+void KeplerLightCurve::addTxt(const std::string& fname)
+{
+  cerr<<fname<<endl;
+  ifstream ifs(fname);
+  if(!ifs)
+    throw runtime_error("Error reading file '"+fname+"'");
   
+  double t,ppm;
+  string comment;
+  while(!ifs.eof()) {
+    if(!(ifs >> t)) {
+      ifs.clear();
+      getline(ifs, comment);
+      cerr<<"Read: "<<comment<<endl;
+      continue;
+    }
+    ifs >> ppm;
+    cout << 1000*t << " -> "<< ppm <<endl;
+    d_obs.push_back({1000*t, ppm, ppm});
+  }
 }
 
 void KeplerLightCurve::sort()
@@ -277,10 +299,15 @@ vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
 		    if(ringbuf.size() > 5) {
 		      double sigma = mean(vme)/sqrt(2*variance(vme));
 		      perfreq << mean(vme) << '\t' << variance(vme) << '\t' << sigma << endl;
-		      if(sigma > 4)
-			unlikely*= 1.1;
-		      else
-			unlikely*=0.9;
+		      if(sigma > 8)
+			unlikely += 2;
+		      else if(sigma > 4)
+			unlikely++;
+		      else if(sigma < 4)
+			unlikely -= 1;
+		      else if(sigma < 2)
+			unlikely -= 2;
+
 		    }
 		    else
 		      perfreq << "0\t0\t0"<<endl;
@@ -323,7 +350,10 @@ vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
       
       
   }
-    
+  {   
+    ofstream ofs("unlikelies", std::fstream::ate | std::fstream::app);
+    ofs<<o.d_freq << '\t' << unlikely<<endl;
+  }
   perfreq << " # unlikely score: "<<unlikely<<endl;
   perfreq << " # quartile powers ";
   for(auto n : {0,1,2,3,4})
@@ -392,7 +422,10 @@ int main(int argc, char**argv)
   KeplerLightCurve klc;
 
   for(int fnum = 1; fnum < argc; ++fnum) {
-    klc.addFits(argv[fnum]);
+    if(boost::ends_with(argv[fnum], ".txt"))
+      klc.addTxt(argv[fnum]);
+    else
+      klc.addFits(argv[fnum]);
   }
   klc.sort();
 
@@ -429,7 +462,7 @@ int main(int argc, char**argv)
 #endif
 
   vector<oscil_t> oscillators;
-  for(double f = 0.09; f< 0.160; f+=0.00001) {
+  for(double f = 0.001; f< 0.04; f+=0.00001) {
     oscillators.push_back({f, 20*f/0.00005, si});
   }
 
