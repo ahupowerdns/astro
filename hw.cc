@@ -300,12 +300,12 @@ vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
 		      double sigma = mean(vme)/sqrt(2*variance(vme));
 		      perfreq << mean(vme) << '\t' << variance(vme) << '\t' << sigma << endl;
 		      if(sigma > 8)
-			unlikely += 2;
+			unlikely += 4;
 		      else if(sigma > 4)
-			unlikely++;
-		      else if(sigma < 4)
-			unlikely -= 1;
+			unlikely+= 2;
 		      else if(sigma < 2)
+			unlikely -= 1;
+		      else if(sigma < 1)
 			unlikely -= 2;
 
 		    }
@@ -420,7 +420,7 @@ int main(int argc, char**argv)
 {   
   feenableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW); 
   KeplerLightCurve klc;
-
+  unlink("unlikelies");
   for(int fnum = 1; fnum < argc; ++fnum) {
     if(boost::ends_with(argv[fnum], ".txt"))
       klc.addTxt(argv[fnum]);
@@ -460,10 +460,10 @@ int main(int argc, char**argv)
   doFreq(o, otimes);
   return 0;
 #endif
-
+  bool insDone=false;
   vector<oscil_t> oscillators;
-  for(double f = 0.001; f< 0.04; f+=0.00001) {
-    oscillators.push_back({f, 20*f/0.00005, si});
+  for(double f = 0.09; f< 0.18; f+=0.00001) {
+    oscillators.push_back({f, 10*f/0.0001, si});
   }
 
   
