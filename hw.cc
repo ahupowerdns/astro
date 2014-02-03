@@ -251,24 +251,24 @@ void normalize(vector<double>& values)
    We can promise we'll only add new time values in ascending order.
 */
 
-class TwoDLabelledArray
+struct OscillatorPerformance
 {
-private:
-  struct Row
-  {
-    double t;
-    vector<double> values;
-  };
-  vector<Row> d_rows;
+  double freq;
+  double unlikely;
+  double mean;
+  double smoothedMean;
+  double stddev;
 };
+
+vector<OscillatorPerformance> g_postos;
 
 typedef HarmonicOscillatorFunctor<CSplineSignalInterpolator> oscil_t;
 pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
 {
   cerr<<"freq: "<<o.d_freq<<endl;
-  
-  ofstream perfreq("perfreq/"+boost::lexical_cast<string>(o.d_freq));
+  string freqname = (boost::format("%f") % o.d_freq).str();
+  ofstream perfreq("perfreq/"+freqname);
   typedef runge_kutta_cash_karp54< state_type > error_stepper_type;
   
   state_type x(2);
@@ -278,6 +278,7 @@ vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
   vector<pair<double, double> > column;
   boost::circular_buffer<double> ringbuf(150);  
   double unlikely=1;
+  VarMeanEstimator totvme;
   integrate_times(make_controlled<error_stepper_type>(1e-1, 1.0e-8), 
 		  o, x, otimes.begin(), otimes.end(), 0.1,
 		  [&](const state_type& s, double t) {
@@ -294,13 +295,13 @@ vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
 		    for(auto& val : ringbuf) {
 		      vme(val);
 		    }
-
+		    totvme(power);
 		    perfreq << t << '\t' << power << '\t';
 		    if(ringbuf.size() > 5) {
 		      double sigma = mean(vme)/sqrt(2*variance(vme));
 		      perfreq << mean(vme) << '\t' << variance(vme) << '\t' << sigma << endl;
-		      if(sigma > 8)
-			unlikely += 4;
+		      if(sigma > 5)
+			unlikely += 8;
 		      else if(sigma > 4)
 			unlikely+= 2;
 		      else if(sigma < 2)
@@ -332,7 +333,7 @@ vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
   }
   fftw_free(out);
   normalize(power);
-  ofstream powfile("perfreq/"+boost::lexical_cast<string>(o.d_freq)+".power");
+  ofstream powfile("perfreq/"+freqname+".power");
   double q[5]={0,0,0,0,0};
   for(unsigned int n =0 ; n < power.size() ; ++n) {
     powfile << n <<'\t' << power[n]<<'\n';
@@ -347,12 +348,16 @@ vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
 	q[3]+=power[n];
       else
 	q[4]+=power[n];
-      
-      
   }
   {   
-    ofstream ofs("unlikelies", std::fstream::ate | std::fstream::app);
-    ofs<<o.d_freq << '\t' << unlikely<<endl;
+    pthread_mutex_lock(&g_lock);
+    OscillatorPerformance op;
+    op.freq = o.d_freq;
+    op.unlikely = unlikely;
+    op.mean = mean(totvme);
+    op.stddev = sqrt(variance(totvme));
+    g_postos.push_back(op);
+    pthread_mutex_unlock(&g_lock); 
   }
   perfreq << " # unlikely score: "<<unlikely<<endl;
   perfreq << " # quartile powers ";
@@ -420,7 +425,7 @@ int main(int argc, char**argv)
 {   
   feenableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW); 
   KeplerLightCurve klc;
-  unlink("unlikelies");
+
   for(int fnum = 1; fnum < argc; ++fnum) {
     if(boost::ends_with(argv[fnum], ".txt"))
       klc.addTxt(argv[fnum]);
@@ -555,6 +560,29 @@ int main(int argc, char**argv)
   ofstream peaks("peaks");
   for(auto peak : graph) {
     peaks << peak.first<<'\t' << peak.second<< '\n';
+  }
+
+  sort(g_postos.begin(), g_postos.end(), 
+       [](const OscillatorPerformance& a, const OscillatorPerformance& b) {
+	 return a.freq < b.freq;
+       }
+       );
+
+
+  int winlen = g_postos.size()/20;
+  ofstream unlikelies("unlikelies");
+  for(auto iter = g_postos.begin(); iter != g_postos.end(); ++iter) {
+    VarMeanEstimator meanVme, stddevVme;
+    auto inner = iter - winlen/2;
+    if(inner < g_postos.begin())
+      inner = g_postos.begin();
+    for(  ; inner < g_postos.end() && inner < iter + winlen/2 ; ++inner) {
+      meanVme(inner->mean);
+      stddevVme(inner->stddev);
+    }
+    iter->smoothedMean = mean(meanVme);
+    unlikelies << iter->freq <<'\t' << iter->unlikely << '\t' << iter->mean << '\t' << iter->smoothedMean <<
+      '\t' << iter->stddev  << '\t' << mean(stddevVme) << '\n';
   }
   return 0;       
 }
