@@ -35,6 +35,11 @@ edit this line in hw.cc:
 
 	for(double f = 0.09; f< 0.18; f+=0.00001) {
 
+### Compiling
+
+$ apt-get install g++ libccfits-dev libfftw3-dev libboost-all-dev
+$ make
+
 
 ## Further output
 A PPM graph is generated called 'plot' which can be opened with many image
