@@ -258,6 +258,7 @@ struct OscillatorPerformance
   double mean;
   double smoothedMean;
   double stddev;
+  vector<double> powers;
 };
 
 vector<OscillatorPerformance> g_postos;
@@ -279,6 +280,7 @@ vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
   boost::circular_buffer<double> ringbuf(150);  
   double unlikely=1;
   VarMeanEstimator totvme;
+  OscillatorPerformance op;
   integrate_times(make_controlled<error_stepper_type>(1e-1, 1.0e-8), 
 		  o, x, otimes.begin(), otimes.end(), 0.1,
 		  [&](const state_type& s, double t) {
@@ -296,6 +298,7 @@ vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
 		      vme(val);
 		    }
 		    totvme(power);
+		    op.powers.push_back(power);
 		    perfreq << t << '\t' << power << '\t';
 		    if(ringbuf.size() > 5) {
 		      double sigma = mean(vme)/sqrt(2*variance(vme));
@@ -308,7 +311,7 @@ vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
 			unlikely -= 1;
 		      else if(sigma < 1)
 			unlikely -= 2;
-
+		    
 		    }
 		    else
 		      perfreq << "0\t0\t0"<<endl;
@@ -351,7 +354,7 @@ vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
   }
   {   
     pthread_mutex_lock(&g_lock);
-    OscillatorPerformance op;
+
     op.freq = o.d_freq;
     op.unlikely = unlikely;
     op.mean = mean(totvme);
@@ -582,7 +585,10 @@ int main(int argc, char**argv)
     }
     iter->smoothedMean = mean(meanVme);
     unlikelies << iter->freq <<'\t' << iter->unlikely << '\t' << iter->mean << '\t' << iter->smoothedMean <<
-      '\t' << iter->stddev  << '\t' << mean(stddevVme) << '\n';
+      '\t' << iter->stddev  << '\t' << mean(stddevVme);
+    for(auto& p : iter->powers) 
+      unlikelies << '\t' << p;
+    unlikelies << '\n';
   }
   return 0;       
 }
