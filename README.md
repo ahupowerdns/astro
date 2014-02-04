@@ -129,5 +129,6 @@ These can then be plotted using (for example) gnuplot:
 	plot 'fit.153' using 1:(100*$2) with impulses, 'allBert/Pollux_True.txt' using ($1/1000):(-0.1*$4) with impulses
 
 Optim needs to be passed the name of the True file as a parameter:
+
 	$ ./optim allBert/Pollux_True.txt
 
