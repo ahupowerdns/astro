@@ -37,7 +37,7 @@ edit this line in hw.cc:
 
 ### Compiling
 
-$ apt-get install g++ libccfits-dev libfftw3-dev libboost-all-dev
+$ sudo apt-get install make g++ libccfits-dev libfftw3-dev libboost-all-dev
 $ make
 
 

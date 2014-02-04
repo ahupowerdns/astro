@@ -13,7 +13,7 @@ all: $(PROGRAMS)
 -include *.d
 
 hw: hw.o oscil.o
-	g++ $^ -lCCfits -lfftw3 -o $@
+	g++ $^ -lCCfits -lcfitsio -lfftw3 -o $@
 
 optim: optim.o misc.o
 	g++ $^ -o $@
