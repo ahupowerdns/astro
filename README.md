@@ -30,6 +30,12 @@ Or alternatively:
 
 	$ ./hw allBert/pollux_ts.txt
 
+NOTE: hw currently scans from 0.09 milliHertz to 0.18 milliHertz, to change,
+edit this line in hw.cc:
+
+	for(double f = 0.09; f< 0.18; f+=0.00001) {
+
+
 ## Further output
 A PPM graph is generated called 'plot' which can be opened with many image
 viewers (gimp works, chrome too). This shows a waterfall, with t=0 on top of
