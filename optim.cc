@@ -162,9 +162,11 @@ double score(TrueSource& ts, vector<Possibility>& cands, double* matches, double
   }
 
   for(const auto& u : ts.getUnmatched()) {
-    //    cout<<"Unmatched: "<<u<<endl;
-    (*missed)++;
-    ret-=1;
+       //    cout<<"Unmatched: "<<u<<endl;
+    if(&u) { // silence warning
+      (*missed)++;
+      ret-=1;
+    }
   }
   (*matches) = ts.size()-(*missed);
   ret+=4*(*matches);
@@ -211,13 +213,13 @@ int main(int argc, char**argv)
       auto cands = filter(d_poss, v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]);
       double matches, mismatches, missed;
       auto s = score(d_ts, cands, &matches, &mismatches, &missed);
-      cerr<<"Score: "<<s<< ", candidates: "<<cands.size()<<" matched: "<<matches<<", MISMATCHES: "<<mismatches<<", missed: "<<missed<<" @ highsig=" << 
+      cerr<<"Score "<<d_count<<": "<<s<< ", candidates: "<<cands.size()<<" matched: "<<matches<<", MISMATCHES: "<<mismatches<<", missed: "<<missed<<" @ highsig=" << 
 	v[0]<<", sig="<<v[1]<<", nosig="<<v[2]<<", unl="<<500*v[3]<<", avgrat="<<v[4]<<", stdrat="<<v[5]<<", fact="<<v[6]<<", sigdays="<<30*v[7]<<endl;
 
       ofstream fit("fit."+boost::lexical_cast<string>(d_count++));
      
       for(auto& c: cands) {
-	fit<<c.freq<<"\t1\n";
+	fit<<c.freq<<"\t"<<c.mean<<'\n';
       }
 
       return s;
@@ -232,14 +234,14 @@ int main(int argc, char**argv)
 
   Amoeba a(0.001);
   VecDoub point(8);
-  point[0]=5;
-  point[1]=4;
-  point[2]=2;
-  point[3]=1;
-  point[4]=1;
-  point[5]=1;
-  point[6]=4;
-  point[7]=2;
+  point[0]=5; // highsig
+  point[1]=4; // sig
+  point[2]=2; // nosig
+  point[3]=1; // unlikely threshold unl (/1000)
+  point[4]=1; // avgrat (meanrat)
+  point[5]=1; // stdrat
+  point[6]=4; // fact points
+  point[7]=2; // number of months
 
   auto v = a.minimize(point, 1, f);
   cerr<<"Evaluations: "<<a.nfunc<<endl;
