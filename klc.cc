@@ -50,7 +50,7 @@ void KeplerLightCurve::addTxt(const std::string& fname)
       continue;
     }
     ifs >> ppm;
-    cout << 1000*t << " -> "<< ppm <<endl;
+    //    cout << 1000*t << " -> "<< ppm <<endl;
     d_obs.push_back({1000*t, ppm, ppm});
   }
 }
@@ -121,3 +121,32 @@ void KeplerLightCurve::removeDC()
     o.fixedFlux -= average;
   }
 }
+
+struct SignalInterpolator
+{
+  explicit SignalInterpolator(const vector<Observation>& obs)
+    : d_obs(&obs)
+  {
+  }
+
+  double operator()(double t) const {
+    auto b=lower_bound(d_obs->begin(), d_obs->end(), t);
+    if(b == d_obs->begin() || b == d_obs->end())
+      return 0;
+    
+    auto a = b - 1;
+    if(a == d_obs->begin())
+      return 0;
+
+    double dt = (b->t - a-> t);
+    if(dt > 10) // makes little sense to interpolate over days
+      return 0;
+    double frac = (t - a->t) / (b->t - a-> t);
+    double val =  frac * b->fixedFlux + (1-frac)*a->fixedFlux;
+    //    cerr<<"t = "<<t<<", Frac: "<<frac<<", aVal: "<<a->fixedFlux<<", bVal: "<<b->fixedFlux<<", returning: "<<val<<endl;
+    return val;
+  }
+
+  const vector<Observation>* d_obs;
+};
+

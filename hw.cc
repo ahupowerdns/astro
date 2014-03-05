@@ -14,221 +14,39 @@
 
 using namespace std;
 
-struct SignalInterpolator
-{
-  explicit SignalInterpolator(const vector<Observation>& obs)
-    : d_obs(&obs)
-  {
-  }
-
-  double operator()(double t) const {
-    auto b=lower_bound(d_obs->begin(), d_obs->end(), t);
-    if(b == d_obs->begin() || b == d_obs->end())
-      return 0;
-    
-    auto a = b - 1;
-    if(a == d_obs->begin())
-      return 0;
-
-    double dt = (b->t - a-> t);
-    if(dt > 10) // makes little sense to interpolate over days
-      return 0;
-    double frac = (t - a->t) / (b->t - a-> t);
-    double val =  frac * b->fixedFlux + (1-frac)*a->fixedFlux;
-    //    cerr<<"t = "<<t<<", Frac: "<<frac<<", aVal: "<<a->fixedFlux<<", bVal: "<<b->fixedFlux<<", returning: "<<val<<endl;
-    return val;
-  }
-
-  const vector<Observation>* d_obs;
-};
-
-
-struct CSplineSignalInterpolator
-{
-  explicit CSplineSignalInterpolator(const vector<Observation>& obs)
-    : d_obs(&obs)
-  {
-    double p, qn, sig, un;
-
-    int n=obs.size();
-    vector<double> u(n-1);
-    d_y2.resize(n);
-
-    d_y2[0]=u[0]=0.0;
-    for (int i=1;i<n-1;i++) {
-      sig=(obs[i].t - obs[i-1].t)/(obs[i+1].t - obs[i-1].t);
-      p=sig*d_y2[i-1]+2.0;
-      d_y2[i]=(sig-1.0)/p;
-      u[i]=(obs[i+1].fixedFlux - obs[i].fixedFlux)/(obs[i+1].t-obs[i].t) - 
-	(obs[i].fixedFlux - obs[i-1].fixedFlux)/(obs[i].t - obs[i-1].t);
-      u[i]=(6.0*u[i]/(obs[i+1].t- obs[i-1].t)-sig*u[i-1])/p;
-    }
-    
-    qn=un=0.0;
-    d_y2[n-1]=(un-qn*u[n-2])/(qn*d_y2[n-2]+1.0);
-    for (int k=n-2;k>=0;k--)
-      d_y2[k]=d_y2[k] * d_y2[k+1]+u[k];
-  }
-
-  double operator()(double t) const {
-
-    auto hi=lower_bound(d_obs->begin(), d_obs->end(), t);
-    if(hi == d_obs->begin() || hi == d_obs->end())
-      return 0;
-    
-    auto lo = hi - 1;
-    if(lo == d_obs->begin()) {
-      //      cout << t << '\t' << 0 << '\n';
-      return 0;
-    }
-
-    double h=hi->t - lo->t;
-    if(h > 10) {// makes little sense to interpolate over days
-      //      cout << t << '\t' << 0 << '\n';
-      return 0;
-    }
-
-    //    if (h == 0.0) nrerror("Bad xa input to routine splint");
-    double a=(hi->t - t)/h;
-    double b=(t - lo->t)/h;
-    double ret= a*lo->fixedFlux + b*hi->fixedFlux +((a*a*a-a)* d_y2[lo - d_obs->begin()]
-						    +(b*b*b-b)*d_y2[hi - d_obs->begin()])*(h*h)/6.0;
-    // cout << t << '\t\ << ret << '\n';
-    return ret;
-  }
-
-  const vector<Observation>* d_obs;
-  vector<double> d_y2;
-};
-
-
-/* we have time values and for each time value numbers per frequency.
-   We can promise we'll only add new time values in ascending order.
-*/
-
-struct OscillatorPerformance
-{
-  double freq;
-  double unlikely;
-  double mean;
-  double smoothedMean;
-  double stddev;
-  vector<double> powers;
-};
-
-vector<OscillatorPerformance> g_postos;
 
 typedef HarmonicOscillatorFunctor<CSplineSignalInterpolator> oscil_t;
-pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
-vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
+
+struct Status 
+{
+  double t;
+  double frequency;
+  double power;
+};
+
+vector<Status> doFreq(oscil_t& o, const vector<double>& otimes)
 {
   cerr<<"freq: "<<o.d_freq<<endl;
-  string freqname = (boost::format("%f") % o.d_freq).str();
-  ofstream perfreq("perfreq/"+freqname);
-  perfreq <<"# time power mean variance sigma\n";
   typedef runge_kutta_cash_karp54< state_type > error_stepper_type;
   
   state_type x(2);
   x[0] = 0.0; // start at x=0.0, p=0.0
   x[1] = 0.0;
   
-  vector<pair<double, double> > column;
-  boost::circular_buffer<double> ringbuf(150);  
-  double unlikely=1;
-  VarMeanEstimator totvme;
-  OscillatorPerformance op;
+  vector<Status> column;
+
   integrate_times(make_controlled<error_stepper_type>(1e-1, 1.0e-8), 
 		  o, x, otimes.begin(), otimes.end(), 0.1,
 		  [&](const state_type& s, double t) {
 		    double power = o.d_freq*o.d_freq*(0.5*x[1]*x[1] + 0.5*x[0]*x[0]*o.d_b)/(o.d_q*o.d_q);
-		    ringbuf.push_back(power);
-
-		    column.emplace_back(make_pair(
-						  o.d_freq, 
-						  power
-						  ));
-		    
-
-		    VarMeanEstimator vme;
-		    for(auto& val : ringbuf) {
-		      vme(val);
-		    }
-		    totvme(power);
-		    op.powers.push_back(power);
-		    perfreq << t << '\t' << power << '\t';
-		    if(ringbuf.size() > 5) {
-		      double sigma = mean(vme)/sqrt(2*variance(vme));
-		      perfreq << mean(vme) << '\t' << variance(vme) << '\t' << sigma << endl;
-		      if(sigma > 5)
-			unlikely += 8;
-		      else if(sigma > 4)
-			unlikely+= 2;
-		      else if(sigma < 2)
-			unlikely -= 1;
-		      else if(sigma < 1)
-			unlikely -= 2;
-		    
-		    }
-		    else
-		      perfreq << "0\t0\t0"<<endl;
-		    perfreq.flush();		    
+		    column.push_back({t, o.d_freq, power});
 		  });
-  
-  vector<double> forfft;
-  forfft.reserve(column.size());
-  for(const auto& ent : column)
-   forfft.push_back(ent.second);
-
-  int nc = (forfft.size()/2+1) ;
-  fftw_complex *out = (fftw_complex*)fftw_malloc ( sizeof ( fftw_complex ) * nc );
-  
-  pthread_mutex_lock(&g_lock); // seriously, they need this
-  auto plan_forward = fftw_plan_dft_r2c_1d ( forfft.size(), &forfft[0], out, FFTW_ESTIMATE );
-  pthread_mutex_unlock(&g_lock); // so sad
-  fftw_execute ( plan_forward );
-  vector<double> power;
-  for(int n = 0 ; n < nc ; ++n) {
-   power.push_back(sqrt(out[n][0]*out[n][0] + out[n][1]*out[n][1]));
-  }
-  fftw_free(out);
-  normalize(power);
-  ofstream powfile("perfreq/"+freqname+".power");
-  double q[5]={0,0,0,0,0};
-  for(unsigned int n =0 ; n < power.size() ; ++n) {
-    powfile << n <<'\t' << power[n]<<'\n';
-    if(n < 5)
-      q[0]+=power[n];
-    else
-      if(n < 10)
-	q[1]+=power[n];
-      else if(n<50)
-	q[2]+=power[n];
-      else if(n<100)
-	q[3]+=power[n];
-      else
-	q[4]+=power[n];
-  }
-  {   
-    pthread_mutex_lock(&g_lock);
-
-    op.freq = o.d_freq;
-    op.unlikely = unlikely;
-    op.mean = mean(totvme);
-    op.stddev = sqrt(variance(totvme));
-    g_postos.push_back(op);
-    pthread_mutex_unlock(&g_lock); 
-  }
-  perfreq << " # unlikely score: "<<unlikely<<endl;
-  perfreq << " # quartile powers ";
-  for(auto n : {0,1,2,3,4})
-    perfreq << q[n] << '\t';
-  perfreq <<endl;
   
   return column;
 }
 
 
-vector<pair<double, double> > emitPowerGraph(double start, double stop, int index,  const vector<vector<pair<double, double> > >& results)
+void emitPowerGraph(double start, double stop, int index,  const vector<vector<Status> >& results)
 {
   vector<pair<double, double> > ret;
   ofstream pplot("power."+boost::lexical_cast<string>(index));
@@ -239,19 +57,18 @@ vector<pair<double, double> > emitPowerGraph(double start, double stop, int inde
     const auto& column = results[i];
       
     for(unsigned int j = start*column.size() ; j < stop*column.size() && j < column.size() ; ++j) {
-      avg[i].second+=column[j].second;
-      avg[i].first=column[j].first; 
+      avg[i].first=column[j].frequency; 
+      avg[i].second+=column[j].power;
       count++;
-    }
-    
+    }    
   }
     
   for(unsigned int i = 0 ; i < avg.size(); ++i) {
     pplot << avg[i].first << "\t";
     pplot<<avg[i].second/count <<endl;
-    ret.push_back({avg[i].first,  avg[i].second/count});
+    //    ret.push_back({avg[i].first,  avg[i].second/count});
   }
-  return ret;
+  //  return ret;
 }
 
 
@@ -271,30 +88,29 @@ int main(int argc, char**argv)
     else
       klc.addFits(argv[fnum]);
   }
-  klc.sort();
 
+  klc.sort();
   klc.removeJumps();
   klc.removeDC();
   klc.plot("lightcurve.plot");
-
-  vector<vector<pair<double, double> > > results;
-
   CSplineSignalInterpolator si(klc.d_obs); // provides continuous view on our sampled data
 
+  // these are the times we want results for
   vector<double> otimes;
-  for(double t = klc.d_obs.begin()->t ; t < klc.d_obs.rbegin()->t; t += 86) {
+  for(double t = klc.d_obs.begin()->t ; t < klc.d_obs.rbegin()->t; t += 7.2) {
     otimes.push_back(t);
   }
   otimes.push_back(klc.d_obs.rbegin()->t);
 
+  // these are the frequencies we want results for
   vector<oscil_t> oscillators;
   for(double f = 0.09; f< 0.18; f+=0.00001) {
     oscillators.push_back({f, 10*f/0.0001, si});
   }
 
-  
+  // this is a single thread that works for us
   auto doPart=[&](vector<oscil_t>::iterator begin, vector<oscil_t>::iterator end) {
-    vector<vector<pair<double, double> > > ret;
+    vector<vector<Status > > ret;
     for(auto iter= begin; iter != end; ++iter) {
       auto column = doFreq(*iter, otimes);
       ret.emplace_back(column);
@@ -302,27 +118,41 @@ int main(int argc, char**argv)
     return ret;
   };
 
+  // launch 4 threads - astoundingly ugly
   vector<decltype(std::async(std::launch::async, doPart, oscillators.begin(), oscillators.end()))> futures;
-
-  //  doPart(oscillators.begin(), oscillators.end());
-
   for(auto& s : splitRange(oscillators, 4)) {
     futures.emplace_back(std::async(std::launch::async, doPart, s.first, s.second));
   }
-
+  vector<vector<Status> > results;
   
+  // reap the results
   for(auto& future : futures) {
     auto part=future.get();
     for(auto& p: part)
       results.push_back(p);
   }
 
+  sort(results.begin(), results.end(), [](const vector<Status>& a, const vector<Status>&b) 
+       {
+	 return a.cbegin()->frequency < b.cbegin()->frequency;
+       });
+
+
+  for(auto& column : results) {
+    string filename = "perfreq/"+ (boost::format("%f") % column.begin()->frequency).str();
+    ofstream ofs(filename);
+    for(auto& val: column) { 
+      ofs << val.t << '\t' << val.power << '\n';
+    }
+  }
+      
+
   double maxVal=0;
   vector<double> pixelhisto;
   for(auto& column : results) 
     for(auto& val: column) { 
-      maxVal=std::max(maxVal, val.second*val.second);
-      pixelhisto.push_back(val.second);
+      maxVal=std::max(maxVal, val.power*val.power);
+      pixelhisto.push_back(val.power);
     }
 
   sort(pixelhisto.begin(), pixelhisto.end());
@@ -340,13 +170,13 @@ int main(int argc, char**argv)
   }
   pixelhistofile<<nowlimit<<'\t'<<limitcount<<'\n';
   pixelhistofile.flush();
-  ofstream plot("plot");
+  ofstream plot("waterfall.ppm");
   
   plot << "P6"<<"\n"<<results.size()<<" "<<results.begin()->size()<<"\n255\n";
 
   for(unsigned y=0; y < results.begin()->size(); ++y) {  
     for(unsigned x=0; x < results.size(); ++x) {
-      auto val = results[x][y].second;
+      auto val = results[x][y].power;
       double r = 2*val*val/maxVal;
       double g = 2*val*val/maxVal - 0.5;
       double b=  2*val*val/maxVal  -1;
@@ -370,44 +200,6 @@ int main(int argc, char**argv)
   emitPowerGraph(0.1, 1.0, 100, results);
   emitPowerGraph(0.1, 1.0, 10100, results);
   emitPowerGraph(0.2, 1.0, 20100, results);
-  auto graph = emitPowerGraph(0.4, 1.0, 40100, results);
-  sort(graph.begin(), graph.end(), 
-       [](const pair<double, double>& a, const pair<double, double>& b) 
-       {
-	 return a.second < b.second;
-       }
-       );
-
-  ofstream peaks("peaks");
-  for(auto peak : graph) {
-    peaks << peak.first<<'\t' << peak.second<< '\n';
-  }
-
-  sort(g_postos.begin(), g_postos.end(), 
-       [](const OscillatorPerformance& a, const OscillatorPerformance& b) {
-	 return a.freq < b.freq;
-       }
-       );
-
-
-  int winlen = g_postos.size()/20;
-  ofstream unlikelies("unlikelies");
-  for(auto iter = g_postos.begin(); iter != g_postos.end(); ++iter) {
-    VarMeanEstimator meanVme, stddevVme;
-    auto inner = iter - winlen/2;
-    if(inner < g_postos.begin())
-      inner = g_postos.begin();
-    for(  ; inner < g_postos.end() && inner < iter + winlen/2 ; ++inner) {
-      meanVme(inner->mean);
-      stddevVme(inner->stddev);
-    }
-    iter->smoothedMean = mean(meanVme);
-    unlikelies << iter->freq <<'\t' << iter->unlikely << '\t' << iter->mean << '\t' << iter->smoothedMean <<
-      '\t' << iter->stddev  << '\t' << mean(stddevVme);
-    for(auto& p : iter->powers) 
-      unlikelies << '\t' << p;
-    unlikelies << '\n';
-  }
+  emitPowerGraph(0.4, 1.0, 40100, results);
   return 0;       
 }
-

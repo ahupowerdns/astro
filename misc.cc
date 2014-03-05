@@ -28,3 +28,4 @@ void normalize(std::vector<double>& values)
   for(auto& val : values)
     val /= average;  
 }
+
