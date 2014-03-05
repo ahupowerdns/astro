@@ -12,7 +12,7 @@ all: $(PROGRAMS)
 
 -include *.d
 
-hw: hw.o oscil.o
+hw: hw.o oscil.o klc.o misc.o
 	g++ $^ -lCCfits -lcfitsio -lfftw3 -o $@
 
 optim: optim.o misc.o
@@ -27,5 +27,5 @@ sweep: sweep.o oscil.o
 
 
 clean:
-	rm -f *~ *.o hw calibrate *.d githash githash.h
+	rm -f *~ *.o $(PROGRAMS) *.d githash githash.h
 
