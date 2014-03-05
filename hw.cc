@@ -1,4 +1,3 @@
-#include <CCfits/CCfits>
 #include <boost/lexical_cast.hpp>
 #include <string>
 #include <iostream>
@@ -10,28 +9,10 @@
 #include <fftw3.h>
 #include <boost/algorithm/string.hpp>
 #include <boost/circular_buffer.hpp>
+#include "klc.hh"
 #include "misc.hh"
 
 using namespace std;
-using namespace CCfits;
-
-struct Observation
-{
-  double t;
-  double rflux;
-  double flux;
-  double fixedFlux;
-  bool operator<(const Observation& rhs) const 
-  {
-    return t < rhs.t;
-  }
-
-  bool operator<(double theirT) const 
-  {
-    return t < theirT;
-  }
-
-};
 
 struct SignalInterpolator
 {
@@ -121,132 +102,6 @@ struct CSplineSignalInterpolator
 };
 
 
-class KeplerLightCurve
-{
-public:
-  void addFits(const std::string& fname);
-  void addTxt(const std::string& fname);
-  void sort();
-  void removeJumps();
-  void removeDC();
-  void plot(const std::string& fname);
-  vector<Observation> d_obs;
-};
-
-void KeplerLightCurve::addFits(const std::string& fname)
-{
-  cerr<<fname<<endl;
-  CCfits::FITS pInfile(fname, Read); 
-
-  ExtHDU& table = pInfile.extension(1);
-    
-  // read all the keywords, excluding those associated with columns.
-    
-  table.readAllKeys();
-  
-  std::vector <double> flux;
-  table.column("PDCSAP_FLUX").read(flux, 0, table.rows());
-  
-  std::vector <double> rflux;
-  table.column("SAP_FLUX").read(rflux, 0, table.rows());
-    
-  std::vector <double> jd;
-  table.column("TIME").read(jd, 0, table.rows());
-    
-  for(unsigned int i=0; i < jd.size(); ++i) {
-    if(std::isnan(jd[i]) || std::isnan(rflux[i]) || std::isnan(flux[i])) 
-      continue;
-    d_obs.push_back({86.0*jd[i], rflux[i], flux[i]});
-  }
-}
-
-void KeplerLightCurve::addTxt(const std::string& fname)
-{
-  cerr<<fname<<endl;
-  ifstream ifs(fname);
-  if(!ifs)
-    throw runtime_error("Error reading file '"+fname+"'");
-  
-  double t,ppm;
-  string comment;
-  while(!ifs.eof()) {
-    if(!(ifs >> t)) {
-      ifs.clear();
-      getline(ifs, comment);
-      cerr<<"Read: "<<comment<<endl;
-      continue;
-    }
-    ifs >> ppm;
-    cout << 1000*t << " -> "<< ppm <<endl;
-    d_obs.push_back({1000*t, ppm, ppm});
-  }
-}
-
-void KeplerLightCurve::sort()
-{
-  ::sort(d_obs.begin(), d_obs.end());
-  cerr<< "Kilosecond timespan: "<<d_obs.begin()->t << " - "<< d_obs.rbegin()->t<<endl;
-}
-
-void KeplerLightCurve::plot(const std::string& fname)
-{
-  ofstream of(fname);
-  of << std::fixed;
-  for(const auto& o : d_obs) 
-    of << o.t*1000.0 << '\t' << o.fixedFlux<<'\n';
-}
-
-void KeplerLightCurve::removeJumps()
-{
-  Observation* prev=0;
-  double reflux=0, diff;
-  unsigned int skips=0;
-  for(auto& o : d_obs) {
-    if(!prev) {
-      prev = &o;
-      continue;
-    }
-    diff = o.flux - prev->flux;
-    if(fabs(diff) < 2000) {
-      reflux+=diff;
-    }
-    else {
-      skips++;
-    }
-    prev->fixedFlux=reflux;
-    prev = &o;
-  }
-  prev->fixedFlux = reflux;
-  cerr<<"Skipped "<<skips<<" implausible jumps"<<endl;
-
-}
-
-void KeplerLightCurve::removeDC()
-{
-  double tot=0;
-  for(auto& o : d_obs) {
-    tot += o.fixedFlux;
-  }
-  double average=tot/d_obs.size();
-  cerr<<"Average: "<<average<<endl;
-
-  for(auto& o : d_obs) {
-    o.fixedFlux -= average;
-  }
-}
-
-
-void normalize(vector<double>& values)
-{
-  double tot = 0;
-  for(const auto& val : values)
-    tot+=val;
-  const double average = tot/values.size();
-
-  for(auto& val : values)
-    val /= average;  
-}
-
 /* we have time values and for each time value numbers per frequency.
    We can promise we'll only add new time values in ascending order.
 */
@@ -270,6 +125,7 @@ vector<pair<double, double> >  doFreq(oscil_t& o, const vector<double>& otimes)
   cerr<<"freq: "<<o.d_freq<<endl;
   string freqname = (boost::format("%f") % o.d_freq).str();
   ofstream perfreq("perfreq/"+freqname);
+  perfreq <<"# time power mean variance sigma\n";
   typedef runge_kutta_cash_karp54< state_type > error_stepper_type;
   
   state_type x(2);
@@ -398,36 +254,16 @@ vector<pair<double, double> > emitPowerGraph(double start, double stop, int inde
   return ret;
 }
 
-template<typename T>
-vector<pair<typename T::iterator, typename T::iterator> >
-splitRange(T& container, int parts)
-{
-  typedef pair<typename T::iterator, typename T::iterator> range_t;
-  vector<range_t > ret;
-  range_t range;
-  typename T::size_type stride = container.size()/parts;
-
-  for(int n=0; n < parts; ++n) {
-    if(!n)
-      range.first = container.begin();
-    else
-      range.first = range.second;
-
-    if(n+1 == parts)
-      range.second = container.end();
-    else
-      range.second = range.first + stride;
-      
-    ret.push_back(range);
-  }
-  
-  return ret;
-}
 
 int main(int argc, char**argv)
 {   
   feenableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW); 
   KeplerLightCurve klc;
+
+  if(argc==1) {
+    cerr<<"Syntax: hw 1.fits|1.txt [2.fits|2.txt] ..."<<endl;
+    return EXIT_FAILURE;
+  }
 
   for(int fnum = 1; fnum < argc; ++fnum) {
     if(boost::ends_with(argv[fnum], ".txt"))
@@ -439,36 +275,18 @@ int main(int argc, char**argv)
 
   klc.removeJumps();
   klc.removeDC();
-  klc.plot("fits.plot");
+  klc.plot("lightcurve.plot");
+
   vector<vector<pair<double, double> > > results;
 
-  CSplineSignalInterpolator si(klc.d_obs);
-#if 0
-  ofstream r("real");
-  for(auto& o : klc.d_obs) {
-    r << o.t << '\t' << o.fixedFlux<<'\n';
-  }
-  r.flush();
-
-  ofstream inter("inter");
-  for(auto t = klc.d_obs.begin()->t; t < klc.d_obs.rbegin()->t; t+=0.5) {
-    inter << t << '\t' << si(t) << '\n';
-  }
- #endif
-
+  CSplineSignalInterpolator si(klc.d_obs); // provides continuous view on our sampled data
 
   vector<double> otimes;
   for(double t = klc.d_obs.begin()->t ; t < klc.d_obs.rbegin()->t; t += 86) {
     otimes.push_back(t);
   }
   otimes.push_back(klc.d_obs.rbegin()->t);
-#if 0
-  double f=0.15791000000000191;
-  oscil_t o(f, 20.0*f/0.00005, si);
-  doFreq(o, otimes);
-  return 0;
-#endif
-  bool insDone=false;
+
   vector<oscil_t> oscillators;
   for(double f = 0.09; f< 0.18; f+=0.00001) {
     oscillators.push_back({f, 10*f/0.0001, si});
@@ -593,35 +411,3 @@ int main(int argc, char**argv)
   return 0;       
 }
 
-
-
-#if 0
-
-  OscillatorBank ob(0.09, 0.160, 0.00002);
-
-  vector<vector<pair<double, double> > > results;
-  
-  double y;
-  double beginTime = klc.d_obs.begin()->t/1000;
-  double endTime = klc.d_obs.rbegin()->t/1000; // kiloseconds
-
-  double step = 0.1; // 500 seconds
-  double t = klc.d_obs.begin()->t;
-  auto o = klc.d_obs.begin();
-  for(unsigned int n = 0; t < endTime; t=beginTime + n++*step) {
-    y=0;
-    while(o != klc.d_obs.end() && t <= o->t  && o->t < t+step) {
-      //      cout << o->t/1000.0 <<'\t'<<o->flux<<'\t'<<o->fixedFlux<<'\n';
-      y+= o->fixedFlux;
-      o++;
-    } 
-
-    //    y += 1000*(sin(2*M_PI*t*0.10)+sin(2*M_PI*t*0.11) + sin(2*M_PI*t*0.12));
-    ob.feed(5*y, step);
-  
-    if(!(n%150)) {
-      results.emplace_back(ob.get());
-    }
-  }
-
-#endif

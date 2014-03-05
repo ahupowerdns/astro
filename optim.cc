@@ -181,6 +181,10 @@ Doub func(VecDoub_I& v)
 
 int main(int argc, char**argv)
 {
+  if(argc != 2) {
+    cerr<<"Syntax: optim True.txt"<<endl;
+    return EXIT_FAILURE;
+  }
   TrueSource ts(argv[1]);
 
   ifstream unl("unlikelies");
