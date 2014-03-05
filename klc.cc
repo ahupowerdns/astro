@@ -61,6 +61,16 @@ void KeplerLightCurve::sort()
   cerr<< "Kilosecond timespan: "<<d_obs.begin()->t << " - "<< d_obs.rbegin()->t<<endl;
 }
 
+void KeplerLightCurve::reverse()
+{
+  sort();
+  auto highTime = d_obs.rbegin()->t;
+  for(auto& o : d_obs) {
+    o.t = highTime - o.t;
+  }
+  sort();
+}
+
 void KeplerLightCurve::plot(const std::string& fname)
 {
   ofstream of(fname);

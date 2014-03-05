@@ -14,7 +14,6 @@
 
 using namespace std;
 
-
 typedef HarmonicOscillatorFunctor<CSplineSignalInterpolator> oscil_t;
 
 struct Status 
@@ -90,6 +89,8 @@ int main(int argc, char**argv)
   }
 
   klc.sort();
+  //  klc.reverse();
+
   klc.removeJumps();
   klc.removeDC();
   klc.plot("lightcurve.plot");
@@ -140,10 +141,14 @@ int main(int argc, char**argv)
 
   for(auto& column : results) {
     string filename = "perfreq/"+ (boost::format("%f") % column.begin()->frequency).str();
-    ofstream ofs(filename);
+    FILE* fp=fopen(filename.c_str(), "w");
+    if(!fp)
+      throw runtime_error("Unable to open file "+filename+": "+string(strerror(errno)));
     for(auto& val: column) { 
-      ofs << val.t << '\t' << val.power << '\n';
+      fwrite(&val.t, sizeof(val.t), 1, fp);
+      fwrite(&val.power, sizeof(val.power), 1, fp);
     }
+    fclose(fp);
   }
       
 

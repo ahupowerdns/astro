@@ -30,6 +30,7 @@ public:
   void removeDC();
   void plot(const std::string& fname);
   void dump(const std::string& fname);
+  void reverse();
   std::vector<Observation> d_obs;
 };
 

@@ -6,7 +6,7 @@ CFLAGS=-Wall -Iodeint-v2 -O3 -MMD -MP
 LDFLAGS=$(CXX2011FLAGS)  
 CHEAT_ARG := $(shell ./update-git-hash-if-necessary)
 
-PROGRAMS=hw optim
+PROGRAMS=hw optim peaker calibrate
 
 all: $(PROGRAMS)
 
@@ -17,6 +17,10 @@ hw: hw.o oscil.o klc.o misc.o
 
 optim: optim.o misc.o
 	g++ $^ -o $@
+
+peaker: peaker.o misc.o
+	g++ $^ -o $@
+
 
 
 calibrate: calibrate.o oscil.o
