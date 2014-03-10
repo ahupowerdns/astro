@@ -65,3 +65,4 @@ splitRange(T& container, int parts)
 }
 
 void normalize(std::vector<double>& values);
+uint64_t filesize(const char* name);

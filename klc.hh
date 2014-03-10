@@ -28,6 +28,7 @@ public:
   void sort();
   void removeJumps();
   void removeDC();
+  void addWhiteNoise(double fraction);
   void plot(const std::string& fname);
   void dump(const std::string& fname);
   void reverse();

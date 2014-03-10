@@ -1,6 +1,7 @@
 #include "misc.hh"
 #include <vector>
 #include <string.h>
+#include <sys/stat.h>
 
 //! read a line of text from a FILE* to a std::string, returns false on 'no data'
 bool stringfgets(FILE* fp, std::string* line)
@@ -29,3 +30,11 @@ void normalize(std::vector<double>& values)
     val /= average;  
 }
 
+uint64_t filesize(const char* name)
+{
+  struct stat buf;
+  if(!stat(name, &buf)) {
+    return buf.st_size;
+  }
+  return 0;
+}

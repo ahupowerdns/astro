@@ -16,6 +16,10 @@ struct Datum
 
 int main(int argc, char**argv)
 {
+  if(argc==1) {
+    cerr<<"Syntax: peaker perfreq/*"<<endl;
+    return EXIT_FAILURE;
+  }
   map<double, vector<Datum> > data;
 
   for(int n = 1; n < argc ; ++n) {
@@ -34,9 +38,10 @@ int main(int argc, char**argv)
 
     ifstream ifs(fname);
     
-    Datum d;
-    while(fread(&d, 1, sizeof(d), fp) == sizeof(d)) {
-      dest.push_back(d);
+    auto size=filesize(fname.c_str());
+    dest.resize(size/sizeof(Datum));
+    if(fread(&dest[0], 1, size, fp) != size) {
+      throw runtime_error("Error reading data from '"+fname+"'");
     }
     fclose(fp);
   }
@@ -51,7 +56,7 @@ int main(int argc, char**argv)
     }
     ofs << data.begin()->second[n].t << '\t' << mean(vme)<<endl;
   }
-
+  cerr<<"Done with averages, now unlikelies... "<<endl;
 
   ofstream unlikelies("unlikelies");
   for(auto& val : data) {
@@ -60,7 +65,9 @@ int main(int argc, char**argv)
 
     boost::circular_buffer<double> ringbuf(12*30);   // 30 days
     double unlikely=0;
+    VarMeanEstimator sig;
     for(const auto& pw : d) {
+      sig(pw.power);
       ringbuf.push_back(pw.power);
       VarMeanEstimator vme;
       for(auto& val : ringbuf) {
@@ -77,10 +84,10 @@ int main(int argc, char**argv)
 	  unlikely -= 1;	
       }
     }
-    unlikelies << freq << '\t' << unlikely<<endl;
+    unlikelies << freq << '\t' << unlikely<<'\t'<<mean(sig)<<'\t'<<sqrt(variance(sig))<<'\n';
 
   }
-  
+  cerr<<"Done"<<endl;
   
 }
 

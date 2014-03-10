@@ -2,8 +2,9 @@
 #include <iostream>
 #include <fstream>
 #include <CCfits/CCfits>
-using namespace CCfits;
+#include "misc.hh"
 
+using namespace CCfits;
 
 using namespace std;
 void KeplerLightCurve::addFits(const std::string& fname)
@@ -58,7 +59,7 @@ void KeplerLightCurve::addTxt(const std::string& fname)
 void KeplerLightCurve::sort()
 {
   ::sort(d_obs.begin(), d_obs.end());
-  cerr<< "Kilosecond timespan: "<<d_obs.begin()->t << " - "<< d_obs.rbegin()->t<<endl;
+  //cerr<< "Kilosecond timespan: "<<d_obs.begin()->t << " - "<< d_obs.rbegin()->t<<endl;
 }
 
 void KeplerLightCurve::reverse()
@@ -131,6 +132,21 @@ void KeplerLightCurve::removeDC()
     o.fixedFlux -= average;
   }
 }
+
+void KeplerLightCurve::addWhiteNoise(double fraction)
+{
+  VarMeanEstimator vme;
+  for(auto& o : d_obs) {
+    vme(o.fixedFlux);
+  }
+
+  double noiseLevel = fraction*sqrt(variance(vme));
+
+  for(auto& o : d_obs) {
+    o.fixedFlux += noiseLevel * (-0.5+1.0*random()/RAND_MAX);
+  }
+}
+
 
 struct SignalInterpolator
 {

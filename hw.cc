@@ -80,6 +80,7 @@ int main(int argc, char**argv)
   TCLAP::ValueArg<double> lowFreqArg("b","low-freq","Low frequency",false, 0.09,"microhertz", cmd);
   TCLAP::ValueArg<double> highFreqArg("e","high-freq","High frequency",false, 0.18,"microhertz", cmd);
   TCLAP::ValueArg<double> intervalArg("i","interval","Measurement interval",false, 2,"hours", cmd);
+  TCLAP::ValueArg<double> whiteNoiseArg("w","white-noise","Fraction",false, 0,"", cmd);
   TCLAP::SwitchArg reverseSwitch("r","reverse","Reverse the timeseries", cmd, false);
   TCLAP::UnlabeledMultiArg<string> filenames("filenames", "file names to read timeseries from", true, "files", cmd);
 
@@ -105,6 +106,10 @@ int main(int argc, char**argv)
 
   klc.removeJumps();
   klc.removeDC();
+  if(whiteNoiseArg.getValue() > 0.0) {
+    cerr<<"Adding "<<whiteNoiseArg.getValue()<<" fraction of white noise to signal"<<endl;
+    klc.addWhiteNoise(whiteNoiseArg.getValue());
+  }
   klc.plot("lightcurve.plot");
   CSplineSignalInterpolator si(klc.d_obs); // provides continuous view on our sampled data
 
@@ -145,6 +150,7 @@ int main(int argc, char**argv)
       results.push_back(p);
   }
 
+  // in theory, sorting should not be necessary. 
   sort(results.begin(), results.end(), [](const vector<Status>& a, const vector<Status>&b) 
        {
 	 return a.cbegin()->frequency < b.cbegin()->frequency;
