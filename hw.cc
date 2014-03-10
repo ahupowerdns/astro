@@ -1,4 +1,5 @@
 #include <boost/lexical_cast.hpp>
+#include "tclap/CmdLine.h"
 #include <string>
 #include <iostream>
 #include <fstream>
@@ -74,22 +75,33 @@ void emitPowerGraph(double start, double stop, int index,  const vector<vector<S
 int main(int argc, char**argv)
 {   
   feenableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW); 
+
+  TCLAP::CmdLine cmd("Command description message", ' ', "0.1");
+  TCLAP::ValueArg<double> lowFreqArg("b","low-freq","Low frequency",false, 0.09,"microhertz", cmd);
+  TCLAP::ValueArg<double> highFreqArg("e","high-freq","High frequency",false, 0.18,"microhertz", cmd);
+  TCLAP::ValueArg<double> intervalArg("i","interval","Measurement interval",false, 2,"hours", cmd);
+  TCLAP::SwitchArg reverseSwitch("r","reverse","Reverse the timeseries", cmd, false);
+  TCLAP::UnlabeledMultiArg<string> filenames("filenames", "file names to read timeseries from", true, "files", cmd);
+
+  cmd.parse(argc, argv);
+
   KeplerLightCurve klc;
 
-  if(argc==1) {
+  if(filenames.getValue().empty()) {
     cerr<<"Syntax: hw 1.fits|1.txt [2.fits|2.txt] ..."<<endl;
     return EXIT_FAILURE;
   }
 
-  for(int fnum = 1; fnum < argc; ++fnum) {
-    if(boost::ends_with(argv[fnum], ".txt"))
-      klc.addTxt(argv[fnum]);
+  for(auto& fname : filenames) {
+    if(boost::ends_with(fname, ".txt"))
+      klc.addTxt(fname);
     else
-      klc.addFits(argv[fnum]);
+      klc.addFits(fname);
   }
 
   klc.sort();
-  //  klc.reverse();
+  if(reverseSwitch.getValue())
+    klc.reverse();
 
   klc.removeJumps();
   klc.removeDC();
@@ -98,14 +110,14 @@ int main(int argc, char**argv)
 
   // these are the times we want results for
   vector<double> otimes;
-  for(double t = klc.d_obs.begin()->t ; t < klc.d_obs.rbegin()->t; t += 7.2) {
+  for(double t = klc.d_obs.begin()->t ; t < klc.d_obs.rbegin()->t; t += intervalArg.getValue()*3.6) {
     otimes.push_back(t);
   }
   otimes.push_back(klc.d_obs.rbegin()->t);
 
   // these are the frequencies we want results for
   vector<oscil_t> oscillators;
-  for(double f = 0.09; f< 0.18; f+=0.00001) {
+  for(double f = lowFreqArg.getValue(); f< highFreqArg.getValue(); f+=0.00001) {
     oscillators.push_back({f, 10*f/0.0001, si});
   }
 
