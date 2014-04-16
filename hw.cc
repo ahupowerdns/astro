@@ -80,6 +80,7 @@ int main(int argc, char**argv)
   TCLAP::ValueArg<double> lowFreqArg("b","low-freq","Low frequency",false, 0.09,"microhertz", cmd);
   TCLAP::ValueArg<double> highFreqArg("e","high-freq","High frequency",false, 0.18,"microhertz", cmd);
   TCLAP::ValueArg<double> freqStepArg("f","freq-step","Frequency step between oscillators",false, 0.00001,"microhertz", cmd);
+  TCLAP::ValueArg<double> tightArg("t","tight-factor","Factor to boost the Q of an oscillator",false, 10,"", cmd);
   TCLAP::ValueArg<double> intervalArg("i","interval","Energy measurement interval",false, 2,"hours", cmd);
   TCLAP::ValueArg<double> whiteNoiseArg("w","white-noise","Fraction",false, 0,"", cmd);
   TCLAP::SwitchArg reverseSwitch("r","reverse","Reverse the timeseries", cmd, false);
@@ -124,7 +125,7 @@ int main(int argc, char**argv)
   // these are the frequencies we want results for
   vector<oscil_t> oscillators;
   for(double f = lowFreqArg.getValue(); f< highFreqArg.getValue(); f+= freqStepArg.getValue()) {
-    oscillators.push_back({f, 10*f/0.0001, si});
+    oscillators.push_back({f, tightArg.getValue()*f/freqStepArg.getValue(), si});
   }
 
   // this is a single thread that works for us

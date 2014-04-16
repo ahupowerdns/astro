@@ -3,6 +3,7 @@
 #include <fstream>
 #include <CCfits/CCfits>
 #include "misc.hh"
+#include <stdexcept>
 
 using namespace CCfits;
 
