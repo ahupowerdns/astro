@@ -79,7 +79,8 @@ int main(int argc, char**argv)
   TCLAP::CmdLine cmd("Command description message", ' ', "0.1");
   TCLAP::ValueArg<double> lowFreqArg("b","low-freq","Low frequency",false, 0.09,"microhertz", cmd);
   TCLAP::ValueArg<double> highFreqArg("e","high-freq","High frequency",false, 0.18,"microhertz", cmd);
-  TCLAP::ValueArg<double> intervalArg("i","interval","Measurement interval",false, 2,"hours", cmd);
+  TCLAP::ValueArg<double> freqStepArg("f","freq-step","Frequency step between oscillators",false, 0.00001,"microhertz", cmd);
+  TCLAP::ValueArg<double> intervalArg("i","interval","Energy measurement interval",false, 2,"hours", cmd);
   TCLAP::ValueArg<double> whiteNoiseArg("w","white-noise","Fraction",false, 0,"", cmd);
   TCLAP::SwitchArg reverseSwitch("r","reverse","Reverse the timeseries", cmd, false);
   TCLAP::UnlabeledMultiArg<string> filenames("filenames", "file names to read timeseries from", true, "files", cmd);
@@ -122,7 +123,7 @@ int main(int argc, char**argv)
 
   // these are the frequencies we want results for
   vector<oscil_t> oscillators;
-  for(double f = lowFreqArg.getValue(); f< highFreqArg.getValue(); f+=0.00001) {
+  for(double f = lowFreqArg.getValue(); f< highFreqArg.getValue(); f+= freqStepArg.getValue()) {
     oscillators.push_back({f, 10*f/0.0001, si});
   }
 
