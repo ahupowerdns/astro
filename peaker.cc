@@ -44,10 +44,22 @@ int main(int argc, char**argv)
       throw runtime_error("Error reading data from '"+fname+"'");
     }
     fclose(fp);
+
+    fp=fopen((fname+".txt").c_str(), "w");
+    if(!fp) {
+      throw runtime_error("Unable to open '"+fname+".txt for writing: "+strerror(errno));
+    }
+    fprintf(fp, "# time\tpower\n");
+    for(const Datum& d: dest) {
+      fprintf(fp, "%f\t%f\n", d.t, d.power);
+    }
+    fclose(fp);
+
   }
   cerr<<"Read data for "<<data.size() <<" frequencies, "<< data.begin()->second.size()*data.size()<<" elements"<<endl;
 
   ofstream ofs("power.average");
+  ofs<<"# time\tpower\n";
   int numrows = data.begin()->second.size();
   for(int n = 0 ; n < numrows; ++n) {
     VarMeanEstimator vme;
@@ -59,11 +71,12 @@ int main(int argc, char**argv)
   cerr<<"Done with averages, now unlikelies... "<<endl;
 
   ofstream unlikelies("unlikelies");
+  unlikelies <<"# freq\tunlikely\tmean\tvariance\n";
   for(auto& val : data) {
     double freq = val.first;
     vector<Datum>& d = val.second;
 
-    boost::circular_buffer<double> ringbuf(12*30);   // 30 days
+    boost::circular_buffer<double> ringbuf(30);   // 30 days
     double unlikely=0;
     VarMeanEstimator sig;
     for(const auto& pw : d) {
